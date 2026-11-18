@@ -189,12 +189,24 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
             try:
                 st.write("Baixando Siscomex, TIPI Receita Federal e CONFAZ (.gov.br)...")
                 res = srv.sincronizar_bases_oficiais(fetcher=baixar_bytes_oficiais)
+                avisos = res.get("avisos_fontes") or {}
                 status.update(
-                    label=f"Sincronização concluída ({res['pares_descobertos']} pares)",
+                    label=(
+                        f"Sincronização concluída ({res['pares_descobertos']} pares)"
+                        if not avisos
+                        else f"Sincronização parcial ({len(avisos)} fonte(s) indisponível(is))"
+                    ),
                     state="complete",
                 )
                 _limpar_cache()
-                st.sidebar.json(res)
+                if avisos:
+                    st.sidebar.warning(
+                        "Alguns portais oficiais não responderam a partir do servidor em nuvem "
+                        "(bloqueio geográfico/instabilidade). A base local e o acervo oficial foram mantidos: "
+                        + ", ".join(sorted(avisos.keys()))
+                    )
+                with st.sidebar.expander("Detalhes da sincronização", expanded=False):
+                    st.json(res)
             except Exception as exc:
                 status.update(label="Falha na sincronização", state="error")
                 st.sidebar.error(str(exc))
