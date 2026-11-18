@@ -2328,5 +2328,5 @@ class RevTributariaService:
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""
-    conteudo, _ = baixar_url_oficial(url)
+    conteudo, _ = baixar_url_oficial(url, timeout=8)
     return conteudo

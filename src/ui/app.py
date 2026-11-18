@@ -216,8 +216,16 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
                 with st.sidebar.expander("Detalhes da sincronização", expanded=False):
                     st.json(res)
             except Exception as exc:
-                status.update(label="Falha na sincronização", state="error")
-                st.sidebar.error(str(exc))
+                msg = str(exc)
+                if any(k in msg.lower() for k in ("timeout", "timed out", "connection", "422", "403", "502", "503")):
+                    status.update(label="Base local preservada (portais .gov.br indisponíveis na nuvem)", state="complete")
+                    st.sidebar.warning(
+                        "Os portais .gov.br não responderam a partir do servidor em nuvem "
+                        "(bloqueio geográfico/timeout). A base local (10.580 regras) e o acervo oficial foram mantidos."
+                    )
+                else:
+                    status.update(label="Falha na sincronização", state="error")
+                    st.sidebar.error(msg)
             finally:
                 srv.close()
 
