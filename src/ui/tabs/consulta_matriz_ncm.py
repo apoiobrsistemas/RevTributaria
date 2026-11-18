@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 
 import streamlit as st
@@ -212,25 +214,65 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     st.dataframe(filtradas, use_container_width=True, hide_index=True)
 
     if filtradas:
-        if st.button("⚙️ Preparar Planilhas para Exportação (.xlsx)", key="cm_prep_xlsx"):
-            srv_exp = RevTributariaService(db_path)
-            try:
-                st.session_state["cm_xlsx_bytes"] = srv_exp.exportar_matriz_padrao_xlsx(filtradas)
-                st.session_state["cm_xlsx_unica_bytes"] = srv_exp.exportar_matriz_erp_unica_xlsx(filtradas)
-                st.session_state["cm_xlsx_name"] = nome_export
-            finally:
-                srv_exp.close()
-        if st.session_state.get("cm_xlsx_bytes"):
+        nome_base = nome_export.rsplit(".", 1)[0]
+        colunas_export = list(filtradas[0].keys())
+
+        buf_csv = io.StringIO()
+        writer = csv.DictWriter(buf_csv, fieldnames=colunas_export, delimiter=";", extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(filtradas)
+        csv_bytes = ("\ufeff" + buf_csv.getvalue()).encode("utf-8")
+
+        linhas_txt = ["|".join(colunas_export)]
+        for row in filtradas:
+            linhas_txt.append("|".join(str(row.get(c, "")).replace("\n", " ") for c in colunas_export))
+        txt_bytes = "\n".join(linhas_txt).encode("utf-8")
+
+        st.markdown("#### 📤 Exportar Resultado")
+        ex1, ex2, ex3 = st.columns(3)
+        ex1.download_button(
+            "📥 Baixar CSV (.csv)",
+            data=csv_bytes,
+            file_name=f"{nome_base}.csv",
+            mime="text/csv",
+            key="cm_dl_csv",
+            use_container_width=True,
+        )
+        ex2.download_button(
+            "📥 Baixar TXT (.txt)",
+            data=txt_bytes,
+            file_name=f"{nome_base}.txt",
+            mime="text/plain",
+            key="cm_dl_txt",
+            use_container_width=True,
+        )
+        if ex3.button("⚙️ Preparar Excel (.xlsx)", key="cm_prep_xlsx", use_container_width=True):
+            with st.spinner("Gerando planilhas Excel (.xlsx)..."):
+                srv_exp = RevTributariaService(db_path)
+                try:
+                    st.session_state["cm_xlsx_bytes"] = srv_exp.exportar_matriz_padrao_xlsx(filtradas)
+                    st.session_state["cm_xlsx_unica_bytes"] = srv_exp.exportar_matriz_erp_unica_xlsx(filtradas)
+                    st.session_state["cm_xlsx_name"] = nome_export
+                    st.session_state["cm_xlsx_qtd"] = len(filtradas)
+                finally:
+                    srv_exp.close()
+
+        if st.session_state.get("cm_xlsx_bytes") and st.session_state.get("cm_xlsx_name") == nome_export:
+            st.success(f"Planilhas Excel prontas ({st.session_state.get('cm_xlsx_qtd', len(filtradas))} linhas). Clique abaixo para baixar:")
             dl1, dl2 = st.columns(2)
             dl1.download_button(
                 "📥 Baixar Multi-Abas (.xlsx)",
                 data=st.session_state["cm_xlsx_bytes"],
                 file_name=st.session_state.get("cm_xlsx_name", nome_export),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_xlsx_multi",
+                use_container_width=True,
             )
             dl2.download_button(
                 "📥 Baixar Aba Única — Layout ERP (.xlsx)",
                 data=st.session_state["cm_xlsx_unica_bytes"],
                 file_name="erp_" + st.session_state.get("cm_xlsx_name", nome_export),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_xlsx_erp",
+                use_container_width=True,
             )
