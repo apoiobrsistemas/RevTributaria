@@ -19,7 +19,7 @@ UFS_BR = [
 def render_consulta_matriz_ncm(*, db_path: str) -> None:
     """Renderiza a consulta completa linha a linha (1 NCM ou lote de NCMs via arquivo)."""
     st.markdown(
-        '<div class="rev-section-card">'
+        '<div class="rev-section-card notranslate" translate="no">'
         '<div class="rev-section-header">'
         '<div class="rev-section-badge">🔎</div>'
         '<div>'

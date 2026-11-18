@@ -92,7 +92,7 @@ def _limpar_cache() -> None:
 
 def _render_sidebar(db_path: str) -> tuple[str, str]:
     st.sidebar.markdown(
-        '<div class="rev-brand">'
+        '<div class="rev-brand notranslate" translate="no">'
         '<div class="rev-brand-icon">⚖️</div>'
         '<div>'
         '<div class="rev-brand-title">RevTributária</div>'
@@ -102,8 +102,9 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
         unsafe_allow_html=True,
     )
 
+    rotina_slot = st.sidebar.empty()
     if not st.session_state.get("rotina_diaria_verificada_sessao"):
-        with st.sidebar.status("🔄 Verificando atualizações oficiais do dia...", expanded=False) as st_dia:
+        with rotina_slot.status("🔄 Verificando atualizações oficiais do dia...", expanded=False) as st_dia:
             srv_dia = RevTributariaService(db_path)
             try:
                 res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
@@ -111,20 +112,16 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
                 st.session_state["rotina_diaria_info"] = res_dia
                 if res_dia.get("executado_agora"):
                     _limpar_cache()
-                    st_dia.update(
-                        label=f"Base sincronizada ({res_dia['ultima_data']})",
-                        state="complete",
-                    )
-                else:
-                    st_dia.update(
-                        label=f"Base sincronizada ({res_dia['ultima_data']})",
-                        state="complete",
-                    )
+                st_dia.update(
+                    label=f"Base sincronizada ({res_dia['ultima_data']})",
+                    state="complete",
+                )
             finally:
                 srv_dia.close()
+        rotina_slot.empty()
 
     st.sidebar.markdown(
-        '<div class="rev-sync-banner">'
+        '<div class="rev-sync-banner notranslate" translate="no">'
         '<span class="rev-pulse" style="background:#2563EB;"></span>'
         '<span>Base sincronizada com portais oficiais</span>'
         '</div>',
@@ -138,7 +135,7 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
         else ""
     )
     st.sidebar.markdown(
-        '<div class="rev-kpi-grid">'
+        '<div class="rev-kpi-grid notranslate" translate="no">'
         '<div class="rev-kpi-card">'
         '<div class="rev-kpi-label">A Conferir</div>'
         f'<div class="rev-kpi-val">{formatar_milhar_ptbr(resumo["regras_a_conferir"])}</div>'
@@ -162,16 +159,12 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
 
     vigia_fmt = formatar_data_ptbr(resumo["ultima_verificacao_vigia"])
     linx_fmt = formatar_data_ptbr(resumo["ultima_sincronizacao_linx"])
-    st.sidebar.markdown(
-        f'<div class="rev-date-badge">🛡️ <strong>Último Vigia:</strong> {vigia_fmt}<br>'
-        f'🔌 <strong>Último Linx:</strong> {linx_fmt}</div>',
-        unsafe_allow_html=True,
-    )
-
     usuario = st.session_state.get("usuario_auditor", "auditor_fiscal")
     iniciais = "".join(p[0].upper() for p in usuario.replace("_", " ").split()[:2]) or "AF"
     st.sidebar.markdown(
-        f'<div class="rev-profile-card">'
+        f'<div class="rev-date-badge notranslate" translate="no">🛡️ <strong>Último Vigia:</strong> {vigia_fmt}<br>'
+        f'🔌 <strong>Último Linx:</strong> {linx_fmt}</div>'
+        f'<div class="rev-profile-card notranslate" translate="no">'
         f'<div class="rev-avatar">{iniciais}</div>'
         f'<div>'
         f'<div style="font-size:0.86rem;font-weight:600;color:#0F172A;">Auditor Fiscal</div>'
@@ -258,7 +251,7 @@ def main() -> None:
     db_path, usuario = _render_sidebar(db_path)
 
     st.markdown(
-        '<div class="rev-hero">'
+        '<div class="rev-hero notranslate" translate="no">'
         '<div class="rev-hero-text">⚖️ <strong>RevTributária</strong> — '
         'Auditoria guiada por normas oficiais. Zero achismo, 100% lastro legal.</div>'
         '<div class="rev-status-pill"><span class="rev-pulse"></span>'
