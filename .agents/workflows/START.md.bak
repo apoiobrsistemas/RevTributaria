@@ -1,0 +1,97 @@
+---
+description: Start Operational Execution Workflow IA Autonomous - RevTributaria
+---
+
+# RevTributaria - Operational Execution Workflow
+
+> **Regra Primordial de Execução:** Nenhum código, migração SQL, parser XML ou consulta de legislação deve ser criada ou alterada sem a consulta prévia às skills listadas para a respectiva etapa. Todo agente deve seguir a esteira sequencial abaixo e validar via `.\workflow.bat`.
+
+---
+
+## 🗺️ Matriz de Atribuição: Agentes vs. Skills
+
+| Etapa / Domínio | Agente Responsável | Skills Obrigatórias a Carregar |
+| :--- | :--- | :--- |
+| **Banco SQLite, Schema 11 Blocos & Histórico** | `@agent_db_architect` | `skills/sqlite_fiscal_schema/SKILL.md`<br>`skills/fiscal_qa_validator/SKILL.md` |
+| **Motor de Cálculo Fiscal & Auditoria XML/ERP** | `@agent_tax_auditor` | `skills/fiscal_math_engine/SKILL.md`<br>`skills/nfe_and_erp_auditor/SKILL.md` |
+| **Scrapers Oficiais (.gov.br), IA & Vigia** | `@agent_law_guard` | `skills/official_law_scraper/SKILL.md` |
+| **Integração Linx Microvix, XML & Matriz ERP** | `@agent_linx_integrator` | `skills/linx_microvix_sync/SKILL.md`<br>`skills/nfe_and_erp_auditor/SKILL.md` |
+| **Testes Pytest, Benchmarks & Guardrails** | `@agent_tax_auditor` / `@agent_db_architect` | `skills/fiscal_qa_validator/SKILL.md` |
+
+---
+
+## 🔄 Fluxo de Desenvolvimento em 5 Passos
+
+### Passo 1: Modelagem e Governança de Dados (`@agent_db_architect`)
+**Gatilho:** O desenvolvedor solicita uma nova tabela, alteração nos 11 blocos fiscais, índice ou rotina de persistência.
+1. Carregar obrigatoriamente:
+   - `skills/sqlite_fiscal_schema/SKILL.md`
+   - `skills/fiscal_qa_validator/SKILL.md`
+2. Validar o impacto nas tabelas (`fontes_legais`, `regras_federais`, `regras_estaduais_icms`, `tabela_terceiros`, `regras_servicos`, `config_erp_importada`, `historico_alteracoes`) e garantir que:
+   - Toda conexão inicialize `PRAGMA journal_mode = WAL;` e `PRAGMA foreign_keys = ON;`.
+   - Mercadorias (`NCM/CEST`) e Serviços (`CNAE/LC 116`) permaneçam em tabelas estritamente separadas.
+   - Nenhuma coluna calculada (MVA ajustado, redução derivada de carga, CST/CFOP esperados, valor ST) seja gravada nas tabelas de regras.
+   - Toda mutação aplique optimistic locking (`versao`) e grave diff campo-a-campo em `historico_alteracoes` na mesma transação.
+3. Entregar o DDL atualizado (`schema.sql`) e os contratos de repositório antes de qualquer codificação de negócio.
+
+### Passo 2: Coleta Oficial e Vigia da Legislação (`@agent_law_guard`)
+**Gatilho:** Implementação ou ajuste de scrapers de SEFAZ/CONFAZ/Receita, prompts de extração por IA ou rotina do Vigia Noturno.
+1. Carregar obrigatoriamente:
+   - `skills/official_law_scraper/SKILL.md`
+2. Garantir blindagem por construção:
+   - Bloquear qualquer URL cujo domínio não termine em `.gov.br`, `.leg.br`, `.jus.br` ou `.mp.br`.
+   - Desabilitar qualquer ferramenta de busca na web nas chamadas de LLM, enviando apenas o texto recortado da norma oficial com NCM/CEST formatados com pontos (`8517.13.00`, `21.053.01`).
+   - Abortar a leitura se o marcador de início do recorte falhar na página baixada.
+   - Validar literalmente toda citação retornada pela IA contra o texto oficial baixado (sem acentos, sem pontuação, em minúsculas).
+3. Assegurar que o Vigia Noturno execute sem IA utilizando os mesmos extratores (`BeautifulSoup`, `pypdf`, `python-docx`, `openpyxl`, `playwright`) da ingestão.
+
+### Passo 3: Integração Linx Microvix, XML e Matriz ERP (`@agent_linx_integrator`)
+**Gatilho:** Sincronização com Web Service SOAP/XML do Linx Microvix, coleta de NF-e/NFS-e ou importação da planilha de configuração do ERP.
+1. Carregar obrigatoriamente:
+   - `skills/linx_microvix_sync/SKILL.md`
+   - `skills/nfe_and_erp_auditor/SKILL.md`
+2. Garantir resiliência e idempotência:
+   - Proibir `TRUNCATE` ou `DELETE` irrestrito; usar exclusivamente `UPSERT` (`ON CONFLICT DO UPDATE`) no SQLite.
+   - Persistir o cursor incremental `timestamp` por `cnpj_emp` somente após o commit da transação.
+   - Separar origem e CST no campo `cst_icms_fiscal` da matriz Linx (`"5.60"` -> `origem=5`, `cst="60"`) e cruzar as pernas de venda (`5.102` / `<UF> NC`) e compra (`1.102` / `MG CO`).
+   - Calcular status da nota (`autorizada`/`cancelada`) e precedência do XML completo sobre o resumo (`resNFe`) via `VIEW` SQL, nunca sobrescrevendo eventos futuros.
+
+### Passo 4: Motor Matemático e Pipeline de Auditoria (`@agent_tax_auditor`)
+**Gatilho:** Implementação ou ajuste nas contas tributárias, conferência de XML item a item ou auditoria das flags internas do ERP.
+1. Carregar obrigatoriamente:
+   - `skills/fiscal_math_engine/SKILL.md`
+   - `skills/nfe_and_erp_auditor/SKILL.md`
+2. Implementar funções puras usando `decimal.Decimal` (zero I/O de banco ou rede):
+   - Aplicar FCP na conta do MVA apenas nas UFs previstas (`RJ`, `PR`, `BA`, `SE`, `AL`) e tratar exceção do RJ na redução por carga fixada (onde a carga inclui FECP).
+   - Cobrir DIFAL Base Única e Base Dupla, Regime de Estimativa Simplificada/Carga Média, ICMS Efetivo (CST 60), FCI (alteração de origem para alíquota 4%) e Reforma Tributária (`IBS/CBS` + `cClassTrib`).
+   - Seguir estritamente a ordem das 13 etapas de auditoria com short-circuit e supressão de erros em cascata.
+   - Auditar flags internas do ERP (`deduz_icms_fcp_custo_medio`, `somar_st_fcp_custo_medio`, `gera_credito_debito`, `escriturar_sem_tributacao`, `icms_st_pago_empresa_guia`).
+
+### Passo 5: Verificação de Qualidade, Guardrails e Regressão (`@agent_tax_auditor` / `@agent_db_architect`)
+**Gatilho:** Código implementado, antes do commit final.
+1. Carregar `skills/fiscal_qa_validator/SKILL.md`.
+2. Executar `.\workflow.bat` e validar a suíte `pytest` cobrindo obrigatoriamente:
+   - **Vetores de Referência do Anexo B** (MVA ajustado RJ `68,10%`, redução SP `51,11%`, redução RJ `36,36%` e `60,00%`, ST completa `R$ 266,63`).
+   - **Cálculos dos 11 Blocos** (DIFAL Base Dupla, ICMS Efetivo, FCI -> 4%, IBS/CBS).
+   - **Guardrails de Arquitetura** (URLs 100% oficiais, SQLite em modo WAL, ausência de `TRUNCATE`, optimistic locking e log em `historico_alteracoes`).
+
+---
+## 🗺️ Matriz de Atribuição: Agentes vs. Skills (Atualizada)
+
+| Etapa / Domínio | Agente Responsável | Skills Obrigatórias a Carregar |
+| :--- | :--- | :--- |
+| **Banco SQLite, Schema 11 Blocos & Histórico** | `@agent_db_architect` | `skills/sqlite_fiscal_schema/SKILL.md`<br>`skills/fiscal_qa_validator/SKILL.md` |
+| **Motor de Cálculo Fiscal & Auditoria XML/ERP** | `@agent_tax_auditor` | `skills/fiscal_math_engine/SKILL.md`<br>`skills/nfe_and_erp_auditor/SKILL.md` |
+| **Scrapers Oficiais (.gov.br), IA & Vigia** | `@agent_law_guard` | `skills/official_law_scraper/SKILL.md` |
+| **Integração Linx Microvix, XML & Matriz ERP** | `@agent_linx_integrator` | `skills/linx_microvix_sync/SKILL.md`<br>`skills/nfe_and_erp_auditor/SKILL.md` |
+| **Interface Visual Local (Streamlit) & Orquestração** | `@agent_tax_auditor` / `@agent_linx_integrator` | `skills/streamlit_fiscal_ui/SKILL.md` |
+| **Testes Pytest, Benchmarks & Guardrails** | `@agent_tax_auditor` / `@agent_db_architect` | `skills/fiscal_qa_validator/SKILL.md` |
+
+## 🛑 Checklist de Conclusão de Tarefa (Gatekeeper)
+
+Antes de marcar qualquer tarefa como concluída, o agente deve responder afirmativamente:
+- [ ] O `schema.sql` e as conexões SQLite ativam `WAL mode`, mantêm Serviços separados de Mercadorias e não gravam colunas calculadas?
+- [ ] As contas utilizam `decimal.Decimal` em funções puras sem I/O e passaram nos benchmarks do Anexo B (`68,10%`, `51,11%`, `36,36%`, `R$ 266,63`)?
+- [ ] Todas as URLs de legislação pertencem a domínios `.gov.br`, `.leg.br`, `.jus.br` ou `.mp.br` e as citações da IA foram validadas literalmente?
+- [ ] A carga do Linx Microvix usa `UPSERT` com controle de `timestamp` por CNPJ (sem `TRUNCATE`)?
+- [ ] O script `.\workflow.bat` foi executado no terminal com exit code `0`?

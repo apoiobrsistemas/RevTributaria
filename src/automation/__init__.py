@@ -1,0 +1,43 @@
+"""Automação de descoberta de NCM/CEST e ingestão de bases oficiais abertas."""
+
+from src.automation.official_ingestor import (
+    URL_CONFAZ_142_18,
+    URL_CONFAZ_52_91,
+    URL_NFE_PORTAL,
+    URL_SISCOMEX_NCM_JSON,
+    URL_TIPI_RFB,
+    descobrir_pares_ncm_cest,
+    ingerir_cbenef_xlsx,
+    ingerir_cclasstrib_xlsx,
+    ingerir_convenio_142_html,
+    ingerir_convenio_52_91_html,
+    ingerir_siscomex_ncm_json,
+    ingerir_tipi_xlsx,
+    parsear_cbenef_xlsx,
+    parsear_cclasstrib_xlsx,
+    parsear_convenio_142_html,
+    parsear_convenio_52_91_html,
+    parsear_siscomex_ncm_json,
+    parsear_tipi_xlsx,
+)
+
+__all__ = [
+    "URL_CONFAZ_142_18",
+    "URL_CONFAZ_52_91",
+    "URL_NFE_PORTAL",
+    "URL_SISCOMEX_NCM_JSON",
+    "URL_TIPI_RFB",
+    "descobrir_pares_ncm_cest",
+    "ingerir_cbenef_xlsx",
+    "ingerir_cclasstrib_xlsx",
+    "ingerir_convenio_142_html",
+    "ingerir_convenio_52_91_html",
+    "ingerir_siscomex_ncm_json",
+    "ingerir_tipi_xlsx",
+    "parsear_cbenef_xlsx",
+    "parsear_cclasstrib_xlsx",
+    "parsear_convenio_142_html",
+    "parsear_convenio_52_91_html",
+    "parsear_siscomex_ncm_json",
+    "parsear_tipi_xlsx",
+]

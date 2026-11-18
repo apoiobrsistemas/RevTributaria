@@ -1,0 +1,9 @@
+[project]
+name = "revtributaria"
+version = "0.1.0"
+description = "Motor de regras tributárias, cálculo fiscal e auditoria de NF-e/ERP"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
