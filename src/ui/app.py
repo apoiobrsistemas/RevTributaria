@@ -13,6 +13,7 @@ import streamlit as st
 
 from src.app.service import RevTributariaService, baixar_bytes_oficiais
 from src.database import DEFAULT_DB_PATH
+from src.database.snapshot import restaurar_snapshot_se_necessario
 from src.ui.design_system import (
     apply_modern_design_system,
     formatar_data_ptbr,
@@ -107,7 +108,11 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
         with rotina_slot.status("🔄 Verificando atualizações oficiais do dia...", expanded=False) as st_dia:
             srv_dia = RevTributariaService(db_path)
             try:
-                snap_res = srv_dia.restaurar_snapshot_cloud()
+                if hasattr(srv_dia, "restaurar_snapshot_cloud"):
+                    snap_res = srv_dia.restaurar_snapshot_cloud()
+                else:
+                    srv_dia.close()
+                    snap_res = restaurar_snapshot_se_necessario(db_path)
                 if snap_res.get("restaurado"):
                     _limpar_cache()
                 res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
