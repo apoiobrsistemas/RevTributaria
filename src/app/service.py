@@ -7,6 +7,7 @@ import io
 import json
 import re
 import sqlite3
+import threading
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -74,6 +75,7 @@ from src.legislation.url_guard import validar_url_oficial
 from src.legislation.vigia import verificar_fontes
 
 FetcherBytesFn = Callable[[str], bytes]
+_ROTINA_DIARIA_LOCK = threading.Lock()
 
 
 class RevTributariaService:
@@ -1527,71 +1529,80 @@ class RevTributariaService:
         fetcher_vigia: Callable[[str, bool], tuple[bytes, str]] | None = None,
     ) -> dict[str, Any]:
         """Executa automaticamente 1x por dia ao abrir o sistema: catálogo + sync + Vigia SHA-256 + validador."""
-        conn = self._get_conn()
-        hoje = data_hoje or date.today().isoformat()
-        row = conn.execute(
-            "SELECT ultima_data, resumo_json FROM controle_execucao_diaria WHERE chave = 'rotina_diaria_abertura'"
-        ).fetchone()
+        with _ROTINA_DIARIA_LOCK:
+            conn = self._get_conn()
+            hoje = data_hoje or date.today().isoformat()
+            row = conn.execute(
+                "SELECT ultima_data, resumo_json FROM controle_execucao_diaria WHERE chave = 'rotina_diaria_abertura'"
+            ).fetchone()
 
-        if row is not None and row["ultima_data"] == hoje and not forcar:
-            resumo_prev = json.loads(row["resumo_json"]) if row["resumo_json"] else {}
-            return {
-                "executado_agora": False,
+            if row is not None and row["ultima_data"] == hoje and not forcar:
+                resumo_prev = json.loads(row["resumo_json"]) if row["resumo_json"] else {}
+                return {
+                    "executado_agora": False,
+                    "ultima_data": hoje,
+                    "resumo": resumo_prev,
+                }
+
+            cat = self.garantir_catalogo_fontes_oficiais()
+
+            sync_res: dict[str, Any] = {"erro": None}
+            try:
+                sync_res = self.sincronizar_bases_oficiais(
+                    fetcher=fetcher_sync or baixar_bytes_oficiais,
+                    uf_origem=uf_origem,
+                )
+            except Exception as exc:
+                sync_res = {"erro": str(exc)}
+
+            alertas_vigia: list[dict[str, Any]] = []
+            vigia_erro: str | None = None
+            try:
+                alertas_obj = verificar_fontes(conn, fetcher=fetcher_vigia)
+                alertas_vigia = [asdict(a) for a in alertas_obj]
+            except Exception as exc:
+                vigia_erro = str(exc)
+
+            try:
+                val_res = self.executar_validacao_ncms(uf_origem=uf_origem, persistir=True)
+                validacao_resumo = {
+                    "total_ncms_mapeados": val_res["total_ncms_mapeados"],
+                    "ncms_conformes": val_res["ncms_conformes"],
+                    "ncms_com_erro": val_res["ncms_com_erro"],
+                    "ncms_com_alerta": val_res["ncms_com_alerta"],
+                }
+            except sqlite3.OperationalError as exc:
+                validacao_resumo = {"erro": str(exc)}
+
+            resumo = {
                 "ultima_data": hoje,
-                "resumo": resumo_prev,
+                "catalogo": cat,
+                "sync": sync_res,
+                "alertas_vigia_novos": len(alertas_vigia),
+                "vigia_erro": vigia_erro,
+                "validacao": validacao_resumo,
             }
+            try:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO controle_execucao_diaria (chave, ultima_data, resumo_json, atualizado_em)
+                        VALUES ('rotina_diaria_abertura', ?, ?, datetime('now'))
+                        ON CONFLICT(chave) DO UPDATE SET
+                            ultima_data = excluded.ultima_data,
+                            resumo_json = excluded.resumo_json,
+                            atualizado_em = datetime('now')
+                        """,
+                        (hoje, json.dumps(resumo, ensure_ascii=False)),
+                    )
+            except sqlite3.OperationalError:
+                pass
 
-        cat = self.garantir_catalogo_fontes_oficiais()
-
-        sync_res: dict[str, Any] = {"erro": None}
-        try:
-            sync_res = self.sincronizar_bases_oficiais(
-                fetcher=fetcher_sync or baixar_bytes_oficiais,
-                uf_origem=uf_origem,
-            )
-        except Exception as exc:
-            sync_res = {"erro": str(exc)}
-
-        alertas_vigia: list[dict[str, Any]] = []
-        vigia_erro: str | None = None
-        try:
-            alertas_obj = verificar_fontes(conn, fetcher=fetcher_vigia)
-            alertas_vigia = [asdict(a) for a in alertas_obj]
-        except Exception as exc:
-            vigia_erro = str(exc)
-
-        val_res = self.executar_validacao_ncms(uf_origem=uf_origem, persistir=True)
-        resumo = {
-            "ultima_data": hoje,
-            "catalogo": cat,
-            "sync": sync_res,
-            "alertas_vigia_novos": len(alertas_vigia),
-            "vigia_erro": vigia_erro,
-            "validacao": {
-                "total_ncms_mapeados": val_res["total_ncms_mapeados"],
-                "ncms_conformes": val_res["ncms_conformes"],
-                "ncms_com_erro": val_res["ncms_com_erro"],
-                "ncms_com_alerta": val_res["ncms_com_alerta"],
-            },
-        }
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO controle_execucao_diaria (chave, ultima_data, resumo_json, atualizado_em)
-                VALUES ('rotina_diaria_abertura', ?, ?, datetime('now'))
-                ON CONFLICT(chave) DO UPDATE SET
-                    ultima_data = excluded.ultima_data,
-                    resumo_json = excluded.resumo_json,
-                    atualizado_em = datetime('now')
-                """,
-                (hoje, json.dumps(resumo, ensure_ascii=False)),
-            )
-
-        return {
-            "executado_agora": True,
-            "ultima_data": hoje,
-            "resumo": resumo,
-        }
+            return {
+                "executado_agora": True,
+                "ultima_data": hoje,
+                "resumo": resumo,
+            }
 
     def consolidar_regras_todos_ncms_base(
         self,

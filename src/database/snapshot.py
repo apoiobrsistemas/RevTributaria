@@ -7,9 +7,12 @@ import json
 import shutil
 import sqlite3
 import tempfile
+import threading
 from pathlib import Path
 
 from src.database.connection import DEFAULT_DB_PATH, init_db
+
+_SNAPSHOT_LOCK = threading.Lock()
 
 SNAPSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 SNAPSHOT_DB_GZ = SNAPSHOT_DIR / "revtributaria_snapshot.db.gz"
@@ -90,27 +93,29 @@ def restaurar_snapshot_se_necessario(db_path: str | Path = DEFAULT_DB_PATH) -> d
     regras_snapshot = int(meta.get("regras_estaduais_ativas") or 0)
     resultado["regras_snapshot"] = regras_snapshot
 
-    conn = init_db(db_path)
-    try:
-        regras_atuais = _contar_regras_ativas(conn)
-        resultado["regras_antes"] = regras_atuais
-        if regras_atuais >= regras_snapshot:
-            return resultado
-
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_db = Path(tmp) / "snapshot.db"
-            with gzip.open(SNAPSHOT_DB_GZ, "rb") as f_in, open(tmp_db, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            origem = sqlite3.connect(str(tmp_db))
-            try:
-                origem.backup(conn)
-            finally:
-                origem.close()
-
-        # Reaplica schema (idempotente) e pragmas obrigatórios após a restauração
-        conn.close()
+    with _SNAPSHOT_LOCK:
         conn = init_db(db_path)
-        resultado["restaurado"] = True
-        return resultado
-    finally:
-        conn.close()
+        try:
+            regras_atuais = _contar_regras_ativas(conn)
+            resultado["regras_antes"] = regras_atuais
+            if regras_atuais >= regras_snapshot:
+                return resultado
+
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_db = Path(tmp) / "snapshot.db"
+                with gzip.open(SNAPSHOT_DB_GZ, "rb") as f_in, open(tmp_db, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                origem = sqlite3.connect(str(tmp_db))
+                try:
+                    origem.backup(conn)
+                finally:
+                    origem.close()
+
+            conn.close()
+            conn = init_db(db_path)
+            resultado["restaurado"] = True
+            return resultado
+        except sqlite3.OperationalError:
+            return resultado
+        finally:
+            conn.close()

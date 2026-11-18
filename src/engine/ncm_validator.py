@@ -563,8 +563,8 @@ def validar_matriz_ncms(
     if persistir:
         with conn:
             conn.execute("DELETE FROM validacoes_ncm WHERE lote_execucao != ?", (lote,))
-            for a in achados:
-                conn.execute(
+            if achados:
+                conn.executemany(
                     """
                     INSERT INTO validacoes_ncm (
                         lote_execucao, ncm, uf_origem, uf_destino,
@@ -572,19 +572,22 @@ def validar_matriz_ncms(
                         categoria, severidade, mensagem, sugestao_correcao
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        lote,
-                        a.ncm,
-                        a.uf_origem,
-                        a.uf_destino,
-                        a.regra_estadual_id,
-                        a.regra_federal_id,
-                        a.codigo_regra,
-                        a.categoria,
-                        a.severidade,
-                        a.mensagem,
-                        a.sugestao_correcao,
-                    ),
+                    [
+                        (
+                            lote,
+                            a.ncm,
+                            a.uf_origem,
+                            a.uf_destino,
+                            a.regra_estadual_id,
+                            a.regra_federal_id,
+                            a.codigo_regra,
+                            a.categoria,
+                            a.severidade,
+                            a.mensagem,
+                            a.sugestao_correcao,
+                        )
+                        for a in achados
+                    ],
                 )
 
     ncms_erro = {a.ncm for a in achados if a.severidade == "ERRO"}
