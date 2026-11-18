@@ -46,6 +46,8 @@ def consultar_regime_cnpj(
     else:
         regime_final = _MAPA_CRT.get(str(crt_xml).strip(), "Lucro Real")
         fonte = f"XML_CRT_{crt_xml or '3'}"
+        if row is not None and row["regime_apuracao"] == regime_final and row["fonte_consulta"] == fonte:
+            return dict(row)
 
     if len(cnpj_limpo) == 14:
         with conn:

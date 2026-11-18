@@ -107,6 +107,9 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
         with rotina_slot.status("🔄 Verificando atualizações oficiais do dia...", expanded=False) as st_dia:
             srv_dia = RevTributariaService(db_path)
             try:
+                snap_res = srv_dia.restaurar_snapshot_cloud()
+                if snap_res.get("restaurado"):
+                    _limpar_cache()
                 res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
                 st.session_state["rotina_diaria_verificada_sessao"] = True
                 st.session_state["rotina_diaria_info"] = res_dia

@@ -36,6 +36,7 @@ from src.database import (
     buscar_regra_terceiro,
     init_db,
     registrar_historico,
+    restaurar_snapshot_se_necessario,
 )
 from src.engine import (
     CASOS_CRITICOS_SP,
@@ -208,6 +209,13 @@ class RevTributariaService:
             qtd_regras = conn.execute(
                 "SELECT COUNT(*) FROM regras_estaduais_icms WHERE status_registro = 'ATIVA'"
             ).fetchone()[0]
+            if qtd_regras < 1000 and str(self.db_path) != ":memory:":
+                snap = self.restaurar_snapshot_cloud()
+                resumo["snapshot_restaurado"] = snap
+                conn = self._get_conn()
+                qtd_regras = conn.execute(
+                    "SELECT COUNT(*) FROM regras_estaduais_icms WHERE status_registro = 'ATIVA'"
+                ).fetchone()[0]
             if qtd_regras < 20 and str(self.db_path) != ":memory:":
                 self.executar_seed_sp(usar_rede=False)
                 from src.app.seed_moda import DEFAULT_MODA_XLSX
@@ -2270,6 +2278,11 @@ class RevTributariaService:
         qtd = indexar_nts_portal_nfe(conn, html, url_oficial=url_oficial)
         conn.commit()
         return qtd
+
+    def restaurar_snapshot_cloud(self) -> dict[str, Any]:
+        """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""
+        self.close()
+        return restaurar_snapshot_se_necessario(self.db_path)
 
     def executar_pipeline_skills_ncm(
         self,
