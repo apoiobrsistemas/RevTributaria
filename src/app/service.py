@@ -117,14 +117,6 @@ class RevTributariaService:
                 validar_url_oficial(u)
                 urls_uso[k] = u
 
-        def _obter(chave: str) -> bytes | str | None:
-            if fontes and chave in fontes:
-                return fontes[chave]
-            if fetcher is not None and chave in urls_uso:
-                validar_url_oficial(urls_uso[chave])
-                return fetcher(urls_uso[chave])
-            return None
-
         resumo: dict[str, Any] = {
             "pares_descobertos": len(pares),
             "siscomex_atualizados": 0,
@@ -134,46 +126,99 @@ class RevTributariaService:
             "cbenef_inseridos": 0,
             "cclasstrib_atualizados": 0,
             "fila_estadual_criada": 0,
+            "avisos_fontes": {},
         }
+
+        def _obter(chave: str) -> bytes | str | None:
+            if fontes and chave in fontes:
+                return fontes[chave]
+            if fetcher is not None and chave in urls_uso:
+                validar_url_oficial(urls_uso[chave])
+                try:
+                    return fetcher(urls_uso[chave])
+                except Exception as exc:
+                    if exc.__class__.__name__ == "DominioNaoOficialError":
+                        raise
+                    resumo["avisos_fontes"][chave] = str(exc)
+                    return None
+            return None
 
         dados_siscomex = _obter("siscomex")
         if dados_siscomex is not None:
-            raw = dados_siscomex.encode("utf-8") if isinstance(dados_siscomex, str) else dados_siscomex
-            resumo["siscomex_atualizados"] = ingerir_siscomex_ncm_json(
-                conn,
-                raw,
-                url_oficial=urls_uso["siscomex"],
-                apenas_ncms=ncms_ativos or None,
-            )
+            try:
+                raw = dados_siscomex.encode("utf-8") if isinstance(dados_siscomex, str) else dados_siscomex
+                resumo["siscomex_atualizados"] = ingerir_siscomex_ncm_json(
+                    conn,
+                    raw,
+                    url_oficial=urls_uso["siscomex"],
+                    apenas_ncms=ncms_ativos or None,
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "DominioNaoOficialError":
+                    raise
+                resumo["avisos_fontes"]["parse_siscomex"] = str(exc)
 
         dados_tipi = _obter("tipi")
         if dados_tipi is not None and isinstance(dados_tipi, (bytes, bytearray)):
-            resumo["tipi_atualizados"] = ingerir_tipi_xlsx(
-                conn,
-                bytes(dados_tipi),
-                url_oficial=urls_uso["tipi"],
-                apenas_ncms=ncms_ativos or None,
-            )
+            try:
+                resumo["tipi_atualizados"] = ingerir_tipi_xlsx(
+                    conn,
+                    bytes(dados_tipi),
+                    url_oficial=urls_uso["tipi"],
+                    apenas_ncms=ncms_ativos or None,
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "DominioNaoOficialError":
+                    raise
+                resumo["avisos_fontes"]["parse_tipi"] = str(exc)
 
         dados_142 = _obter("confaz_142")
         if dados_142 is not None:
-            html_142 = dados_142.decode("utf-8", errors="replace") if isinstance(dados_142, (bytes, bytearray)) else dados_142
-            resumo["confaz_142_atualizados"] = ingerir_convenio_142_html(
-                conn, html_142, url_oficial=urls_uso["confaz_142"], uf_terceiro=uf_origem
-            )
+            try:
+                html_142 = dados_142.decode("utf-8", errors="replace") if isinstance(dados_142, (bytes, bytearray)) else dados_142
+                resumo["confaz_142_atualizados"] = ingerir_convenio_142_html(
+                    conn, html_142, url_oficial=urls_uso["confaz_142"], uf_terceiro=uf_origem
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "DominioNaoOficialError":
+                    raise
+                resumo["avisos_fontes"]["parse_confaz_142"] = str(exc)
 
         dados_52 = _obter("confaz_52_91")
         if dados_52 is not None:
-            html_52 = dados_52.decode("utf-8", errors="replace") if isinstance(dados_52, (bytes, bytearray)) else dados_52
-            resumo["confaz_52_91_atualizados"] = ingerir_convenio_52_91_html(
-                conn, html_52, url_oficial=urls_uso["confaz_52_91"], uf_terceiro=uf_origem
-            )
+            try:
+                html_52 = dados_52.decode("utf-8", errors="replace") if isinstance(dados_52, (bytes, bytearray)) else dados_52
+                resumo["confaz_52_91_atualizados"] = ingerir_convenio_52_91_html(
+                    conn, html_52, url_oficial=urls_uso["confaz_52_91"], uf_terceiro=uf_origem
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "DominioNaoOficialError":
+                    raise
+                resumo["avisos_fontes"]["parse_confaz_52_91"] = str(exc)
 
         if fontes and "cbenef" in fontes and isinstance(fontes["cbenef"], (bytes, bytearray)):
             resumo["cbenef_inseridos"] = ingerir_cbenef_xlsx(conn, bytes(fontes["cbenef"]))
 
         if fontes and "cclasstrib" in fontes and isinstance(fontes["cclasstrib"], (bytes, bytearray)):
             resumo["cclasstrib_atualizados"] = ingerir_cclasstrib_xlsx(conn, bytes(fontes["cclasstrib"]))
+
+        if fetcher is baixar_bytes_oficiais and not fontes:
+            self.garantir_catalogo_fontes_oficiais()
+            self.garantir_acervo_oficial()
+            qtd_regras = conn.execute(
+                "SELECT COUNT(*) FROM regras_estaduais_icms WHERE status_registro = 'ATIVA'"
+            ).fetchone()[0]
+            if qtd_regras < 20 and str(self.db_path) != ":memory:":
+                self.executar_seed_sp(usar_rede=False)
+                from src.app.seed_moda import DEFAULT_MODA_XLSX
+
+                if DEFAULT_MODA_XLSX.exists():
+                    self.importar_regras_lote(
+                        DEFAULT_MODA_XLSX.read_bytes(),
+                        extensao=".xlsx",
+                        usuario="sync_cloud_fallback",
+                    )
+                self.consolidar_regras_todos_ncms_base(uf_origem=uf_origem)
 
         # Enfileira pares descobertos sem regra estadual vigente como A_CONFERIR
         hoje = date.today().isoformat()
