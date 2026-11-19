@@ -528,8 +528,62 @@ def test_matriz_consolidada_entradas_e_saidas_com_mva_e_flags():
     assert colunas_obrigatorias.issubset(set(saidas[0].keys()))
 
     compra_st = next(l for l in entradas if l["Natureza de Operação"] == "(E) Compra para Comercialização" and l["Regime Tributário"] == "Regime Normal")
-    venda_nc = next(l for l in saidas if l["Natureza de Operação"] == "(S) Venda de Mercadorias — Não Contribuinte" and l["Regime Tributário"] == "Regime Normal")
+    venda_nc = next(l for l in saidas if l["Natureza de Operação"] == "(S) Venda de Mercadorias" and "Não Contribuinte" in l["Perfil Destinatário/Remetente"] and l["Regime Tributário"] == "Regime Normal")
     assert compra_st["MVA Ajustada Nacional (%)"] > compra_st["MVA Original (%)"]
     assert compra_st["MVA Ajustada Importado 4% (%)"] > compra_st["MVA Ajustada Nacional (%)"]
     assert venda_nc["DIFAL (%)"] > 0.0
     assert "gov.br" in compra_st["Fonte Oficial (.gov.br)"]
+
+
+def test_desdobramento_condicional_minimo_4_cenarios():
+    from src.engine import gerar_matriz_consolidada_ncm
+
+    # 1. NCM apenas Tributado Integralmente (operação interna SP->SP, zero linhas fantasmas de ST/Redução/Isenção)
+    l1 = gerar_matriz_consolidada_ncm(
+        "39269090", "SP", "SP",
+        {"tem_st": 0, "aliquota_icms": 18.0, "reducao_base_icms": 0.0},
+        incluir_simples_nacional=False,
+    )
+    assert all(r["Enquadramento ICMS"] == "Tributado Integralmente" for r in l1)
+    assert all(r["Tem ST?"] == "Não" for r in l1)
+    # Operação interna sem variação de origem -> consolida Venda em 1 linha única!
+    vendas_l1 = [r for r in l1 if r["Natureza de Operação"] == "(S) Venda de Mercadorias"]
+    assert len(vendas_l1) == 1
+    assert "Regra Única" in vendas_l1[0]["Cenário / Nomenclatura Fiscal"]
+
+    # 2. NCM 100% ST -> apenas ST nas operações sujeitas (zero Tributado Integralmente em Compra/Venda)
+    l2 = gerar_matriz_consolidada_ncm(
+        "85071090", "SP", "RJ",
+        {"cest": "0100100", "tem_st": 1, "aliquota_icms": 18.0, "aliquota_icms_st": 20.0, "margem_st": 40.0},
+        incluir_simples_nacional=False,
+    )
+    compras_l2 = [r for r in l2 if r["Natureza de Operação"] == "(E) Compra para Comercialização"]
+    assert all(r["Enquadramento ICMS"] == "ST" for r in compras_l2)
+
+    # 3. Coexistência: Tributado Integralmente + ST + Importado
+    l3 = gerar_matriz_consolidada_ncm(
+        "85071090", "SP", "RJ",
+        {"cest": "0100100", "tem_st": 1, "coexiste_tributado": True, "aliquota_icms": 18.0, "aliquota_icms_st": 20.0, "margem_st": 40.0},
+        incluir_simples_nacional=False,
+    )
+    compras_l3 = [r for r in l3 if r["Natureza de Operação"] == "(E) Compra para Comercialização"]
+    assert {r["Enquadramento ICMS"] for r in compras_l3} == {"ST", "Tributado Integralmente"}
+    assert any("Importado" in r["Origem"] for r in compras_l3)
+
+    # 4. Venda Tributada (1 regra única SP->SP) + Transferência Isenta apenas Nacional (2 variações)
+    l4 = gerar_matriz_consolidada_ncm(
+        "84713019", "SP", "SP",
+        {
+            "tem_st": 0,
+            "aliquota_icms": 18.0,
+            "excecoes_operacao": {
+                "Transferência": {"nacional": "Isento", "importado": "Tributado Integralmente"}
+            },
+        },
+        incluir_simples_nacional=False,
+    )
+    vendas_l4 = [r for r in l4 if r["Natureza de Operação"] == "(S) Venda de Mercadorias"]
+    transf_l4 = [r for r in l4 if r["Natureza de Operação"] == "(E) Transferência de Mercadorias"]
+    assert len(vendas_l4) == 1
+    assert len(transf_l4) == 2
+    assert {r["Enquadramento ICMS"] for r in transf_l4} == {"Isento", "Tributado Integralmente"}
