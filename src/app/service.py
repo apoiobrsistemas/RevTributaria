@@ -52,6 +52,7 @@ from src.engine import (
     ItemCalculo,
     REVOGACOES_ST_SP,
     auditar_config_erp,
+    auditar_lote_xml_entrada,
     auditar_nfe_contra_lei,
     avaliar_arvore_5_camadas,
     avaliar_operacao_bidirecional,
@@ -69,10 +70,13 @@ from src.engine.matrix_generator import ALIQUOTA_FCP_PADRAO_UF, ALIQUOTA_INTERNA
 from src.integrations import (
     METODOS_SUPORTADOS,
     MicrovixClient,
+    conciliar_lote_com_microvix,
     consultar_regime_cnpj,
+    exportar_relatorio_auditoria_lote_xlsx,
     extrair_metadados_emitente_xml,
     importar_planilha_matriz_erp,
     ingerir_nfe_idempotente,
+    parsear_arquivos_entrada,
     sincronizar_metodo,
 )
 from src.legislation.acervo import (
@@ -2483,6 +2487,42 @@ class RevTributariaService:
     def validar_xml_reforma(xml_str: str) -> dict[str, Any]:
         """Valida grupos XML gIBSCBS e gIS conforme NT SVRS e Art. 12 § 2º da LC 214/2025."""
         return validar_xml_reforma_lc214(xml_str)
+
+    def auditar_lote_entradas_xml(
+        self,
+        arquivos: list[tuple[str, bytes]],
+        *,
+        finalidade_padrao: str = "COMERCIALIZACAO",
+        finalidades_por_item: dict[tuple[str, int], str] | None = None,
+        erp_registros: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Executa parser seguro, auditoria bidirecional de entradas em lote e conciliação Linx Microvix."""
+        conn = self._get_conn()
+        parsed = parsear_arquivos_entrada(arquivos)
+        res_lote = auditar_lote_xml_entrada(
+            parsed["notas"],
+            conn=conn,
+            finalidade_padrao=finalidade_padrao,
+            finalidades_por_item=finalidades_por_item,
+        )
+        divergencias_erp = conciliar_lote_com_microvix(
+            conn,
+            res_lote["itens_auditados"],
+            erp_registros=erp_registros,
+        )
+        return {
+            **res_lote,
+            "erros_parse": parsed["erros"],
+            "divergencias_erp": divergencias_erp,
+        }
+
+    @staticmethod
+    def exportar_auditoria_lote_xlsx(
+        resultado_lote: dict[str, Any],
+        divergencias_erp: list[dict[str, Any]],
+    ) -> bytes:
+        """Exporta relatório executivo (.xlsx) em 4 abas com sanitização anti-Formula Injection."""
+        return exportar_relatorio_auditoria_lote_xlsx(resultado_lote, divergencias_erp)
 
     def restaurar_snapshot_cloud(self) -> dict[str, Any]:
         """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""

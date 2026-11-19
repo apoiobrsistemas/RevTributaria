@@ -21,11 +21,17 @@ from src.engine.fiscal_engine import (
     avaliar_operacao_bidirecional,
     resolver_parametros_estaduais,
 )
+from src.engine.lote_entrada_auditor import auditar_lote_xml_entrada
 from src.engine.reforma_tributaria_engine import (
     ContextoReformaLC214,
     calcular_transicao_lc214,
 )
 from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
+from src.integrations.microvix_conciliador import (
+    conciliar_lote_com_microvix,
+    exportar_relatorio_auditoria_lote_xlsx,
+)
+from src.integrations.xml_entrada_parser import parsear_arquivos_entrada
 from src.ui.design_system import formatar_ncm_mascara
 
 UFS_BR = [
@@ -438,6 +444,69 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             else:
                 for err in v_xml["erros"]:
                     st.error(f"🚫 {err}")
+
+    with st.expander("📥 Auditoria Lote XML de Entrada & Conciliação ERP (Linx Microvix)", expanded=False):
+        l1, l2 = st.columns([2.0, 1.0])
+        arqs_lote = l1.file_uploader(
+            "Subir XMLs ou pacote ZIP de NF-es de Entrada (.xml / .zip)",
+            type=["xml", "zip"],
+            accept_multiple_files=True,
+            key="cm_lote_xml_up",
+        )
+        fin_lote = l2.selectbox(
+            "Finalidade Padrão do Lote",
+            ["COMERCIALIZACAO", "INDUSTRIALIZACAO", "USO_CONSUMO", "ATIVO_IMOBILIZADO", "DEVOLUCAO"],
+            key="cm_lote_fin",
+        )
+        if arqs_lote and st.button("🚀 Auditar Lote & Conciliar Microvix", type="primary", key="cm_lote_run"):
+            payload_arqs = [(a.name, a.getvalue()) for a in arqs_lote]
+            parsed_lote = parsear_arquivos_entrada(payload_arqs)
+            _conn_lote = init_db(db_path)
+            try:
+                res_lote = auditar_lote_xml_entrada(
+                    parsed_lote["notas"],
+                    conn=_conn_lote,
+                    finalidade_padrao=fin_lote,
+                )
+                divs_erp = conciliar_lote_com_microvix(_conn_lote, res_lote["itens_auditados"])
+            finally:
+                _conn_lote.close()
+            st.session_state["cm_lote_res"] = res_lote
+            st.session_state["cm_lote_erp"] = divs_erp
+            st.session_state["cm_lote_erros_parse"] = parsed_lote["erros"]
+
+        if st.session_state.get("cm_lote_res"):
+            res_lote = st.session_state["cm_lote_res"]
+            divs_erp = st.session_state.get("cm_lote_erp") or []
+            for ep in st.session_state.get("cm_lote_erros_parse") or []:
+                st.error(f"Erro XML ({ep['arquivo']}): {ep['erro']}")
+
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Notas Auditadas", res_lote["total_notas"])
+            k2.metric("Antecipação ST (GNRE)", f"R$ {res_lote['antecipacao_st_total']:.2f}")
+            k3.metric("DIFAL + FCP", f"R$ {res_lote['difal_fcp_total']:.2f}")
+            k4.metric("Crédito Legítimo", f"R$ {res_lote['credito_legitimo_total']:.2f}")
+            k5.metric("Crédito Glosado", f"R$ {res_lote['credito_glosado_total']:.2f}")
+
+            risco_filtro = st.selectbox(
+                "Filtrar por Semáforo de Risco",
+                ["Todos", "VERMELHO", "AMARELO", "VERDE"],
+                key="cm_lote_risco_f",
+            )
+            itens_exibir = [
+                it for it in res_lote["itens_auditados"]
+                if risco_filtro == "Todos" or it["Semáforo"] == risco_filtro
+            ]
+            st.dataframe(itens_exibir, use_container_width=True, hide_index=True)
+
+            xlsx_exec = exportar_relatorio_auditoria_lote_xlsx(res_lote, divs_erp)
+            st.download_button(
+                "📥 Baixar Relatório Executivo (4 Abas .xlsx)",
+                data=xlsx_exec,
+                file_name="auditoria_lote_entradas_microvix.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_lote_dl_xlsx",
+            )
 
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)

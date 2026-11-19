@@ -17,11 +17,21 @@ from src.integrations.matriz_parser import (
     parsear_config_tributaria_linx,
     separar_origem_cst,
 )
+from src.integrations.microvix_conciliador import (
+    conciliar_lote_com_microvix,
+    exportar_relatorio_auditoria_lote_xlsx,
+    sanitizar_celula_planilha,
+)
 from src.integrations.nfe_collector import (
     extrair_metadados_emitente_xml,
     ingerir_nfe_idempotente,
     parsear_nfe_xml,
     registrar_evento_nfe,
+)
+from src.integrations.xml_entrada_parser import (
+    XMLSegurancaError,
+    parsear_arquivos_entrada,
+    parsear_nfe_entrada_xml,
 )
 
 __all__ = [
@@ -29,17 +39,23 @@ __all__ = [
     "MICROVIX_ENDPOINT",
     "MicrovixClient",
     "MicrovixError",
+    "XMLSegurancaError",
+    "conciliar_lote_com_microvix",
     "consultar_regime_cnpj",
+    "exportar_relatorio_auditoria_lote_xlsx",
     "extrair_metadados_emitente_xml",
     "identificar_perna_operacao",
     "importar_planilha_matriz_erp",
     "ingerir_nfe_idempotente",
     "montar_envelope_microvix",
     "obter_chave_microvix",
+    "parsear_arquivos_entrada",
     "parsear_config_tributaria_linx",
+    "parsear_nfe_entrada_xml",
     "parsear_nfe_xml",
     "parsear_resposta_microvix",
     "registrar_evento_nfe",
+    "sanitizar_celula_planilha",
     "separar_origem_cst",
     "sincronizar_metodo",
 ]
