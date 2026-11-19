@@ -26,6 +26,52 @@ UFS_BR = [
 ]
 
 
+@st.cache_data(ttl=120)
+def _cache_ncms_disponiveis(db_path: str) -> list[str]:
+    srv = RevTributariaService(db_path)
+    try:
+        return srv.listar_ncms_disponiveis()
+    finally:
+        srv.close()
+
+
+@st.cache_data(ttl=120)
+def _cache_pre_validacao(db_path: str, ncms_tuple: tuple[str, ...], uf_orig: str, data_iso: str) -> dict:
+    srv = RevTributariaService(db_path)
+    try:
+        return srv.validar_pre_consulta_ncms(
+            list(ncms_tuple),
+            uf_origem=uf_orig,
+            data_referencia=data_iso,
+        )
+    finally:
+        srv.close()
+
+
+@st.cache_data(ttl=120)
+def _cache_matriz_operacional(
+    db_path: str,
+    ncm: str,
+    uf_orig: str,
+    destinos_tuple: tuple[str, ...] | None,
+    data_iso: str,
+    regime_emp: str,
+    atividade_emp: str,
+) -> list[dict]:
+    srv = RevTributariaService(db_path)
+    try:
+        return srv.consultar_matriz_operacional_todas_ufs(
+            ncm=ncm,
+            uf_origem=uf_orig,
+            ufs_destino=list(destinos_tuple) if destinos_tuple else None,
+            data_referencia=data_iso,
+            regime_tributario=regime_emp,
+            atividade_empresa=atividade_emp,
+        )
+    finally:
+        srv.close()
+
+
 def render_consulta_matriz_ncm(*, db_path: str) -> None:
     """Renderiza a consulta completa linha a linha (1 NCM ou lote de NCMs via arquivo)."""
     import src.engine.fiscal_engine as _fe_mod
@@ -84,12 +130,6 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         key="cm_modo",
     )
 
-    srv_ncm = RevTributariaService(db_path)
-    try:
-        ncms_disponiveis = srv_ncm.listar_ncms_disponiveis()
-    finally:
-        srv_ncm.close()
-
     regimes_emp = [
         "Lucro Real",
         "Lucro Presumido",
@@ -116,6 +156,7 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     nome_export = "planilha_padrao"
 
     if modo.startswith("Consulta Individual"):
+        ncms_disponiveis = _cache_ncms_disponiveis(db_path)
         if ncms_disponiveis:
             default_idx = ncms_disponiveis.index("85071090") if "85071090" in ncms_disponiveis else 0
             ncm_sel = st.selectbox(
@@ -134,23 +175,17 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             "Dica: digite os 8 dígitos sem pontos ou selecione um NCM já homologado na lista."
         )
 
-        srv = RevTributariaService(db_path)
-        try:
-            pre_val = srv.validar_pre_consulta_ncms(
-                [ncm],
-                uf_origem=uf_orig,
-                data_referencia=data_ref.isoformat(),
-            )
-            linhas = srv.consultar_matriz_operacional_todas_ufs(
-                ncm=ncm,
-                uf_origem=uf_orig,
-                ufs_destino=destinos_param,
-                data_referencia=data_ref.isoformat(),
-                regime_tributario=regime_emp,
-                atividade_empresa=atividade_emp,
-            )
-        finally:
-            srv.close()
+        destinos_tuple = tuple(destinos_param) if destinos_param else None
+        pre_val = _cache_pre_validacao(db_path, (ncm,), uf_orig, data_ref.isoformat())
+        linhas = _cache_matriz_operacional(
+            db_path,
+            ncm,
+            uf_orig,
+            destinos_tuple,
+            data_ref.isoformat(),
+            regime_emp,
+            atividade_emp,
+        )
 
         sufixo = "TODAS_UFS" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
         nome_export = f"planilha_padrao_{ncm}_{uf_orig}_{sufixo}.xlsx"
@@ -677,8 +712,14 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         and (ncm_filtro == "Todos" or str(l["NCM"]) == ncm_filtro)
     ]
 
-    st.caption(f"Exibindo {len(filtradas)} linha(s) ({uf_orig} -> {uf_dest_sel}).")
-    st.dataframe(filtradas, use_container_width=True, hide_index=True)
+    exibir_todas = len(filtradas) <= 200 or st.checkbox(
+        f"Exibir todas as {len(filtradas)} linhas na tabela em tela (exportações sempre incluem 100%)",
+        value=False,
+        key="cm_exibir_todas_tabela",
+    )
+    linhas_tabela = filtradas if exibir_todas else filtradas[:200]
+    st.caption(f"Exibindo {len(linhas_tabela)} de {len(filtradas)} linha(s) ({uf_orig} -> {uf_dest_sel}).")
+    st.dataframe(linhas_tabela, use_container_width=True, hide_index=True)
 
     if filtradas:
         nome_base = nome_export.rsplit(".", 1)[0]
