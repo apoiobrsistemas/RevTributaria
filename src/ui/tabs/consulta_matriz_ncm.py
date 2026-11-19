@@ -169,15 +169,54 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 index=default_idx,
                 key="cm_ncm_sel",
             )
-            ncm_manual = st.text_input("Ou digite outro NCM (8 dígitos)", value="", key="cm_ncm_manual")
-            ncm = ncm_manual.strip() or ncm_sel
+            ncm_manual = st.text_input("Ou digite outro NCM (8 dígitos ou com pontos)", value="", key="cm_ncm_manual")
+            ncm_bruto = ncm_manual.strip() or ncm_sel
         else:
-            ncm = st.text_input("NCM (8 dígitos)", value="85171300", key="cm_ncm_txt")
+            ncm_bruto = st.text_input("NCM (8 dígitos)", value="85171300", key="cm_ncm_txt")
+
+        import re as _re_ncm
+        ncm = _re_ncm.sub(r"\D", "", str(ncm_bruto or "")) or str(ncm_bruto).strip()
 
         st.caption(
-            f"📌 NCM em análise: `{formatar_ncm_mascara(ncm)}` — "
-            "Dica: digite os 8 dígitos sem pontos ou selecione um NCM já homologado na lista."
+            f"📌 NCM em análise: `{formatar_ncm_mascara(ncm)}` (normalizado: `{ncm}`) — "
+            "Dica: digite com ou sem pontos (ex.: 1905.31.00 ou 19053100)."
         )
+
+        uf_dest_res = "SP" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
+        chave_res = f"{ncm}|{uf_orig}|{uf_dest_res}|{data_ref.isoformat()}"
+        if st.session_state.get("cm_ultima_chave_res") != chave_res:
+            with st.status(f"Resolvendo regra oficial para NCM {formatar_ncm_mascara(ncm)}...", expanded=False) as st_res:
+                st.write("[1/3] Buscando regra vigente no SQLite local (NCM normalizado em 5 camadas)...")
+                srv_res = RevTributariaService(db_path)
+                try:
+                    st.write("[2/3] Sincronizando anexos de ST, Portarias e TIPI nas fontes oficiais (.gov.br) se ausente...")
+                    res_sync = srv_res.resolver_ou_sincronizar_regra_ncm(
+                        ncm=ncm,
+                        uf_origem=uf_orig,
+                        uf_destino=uf_dest_res,
+                        data_referencia=data_ref.isoformat(),
+                    )
+                    st.write("[3/3] Validando citações literais e montando matriz operacional...")
+                finally:
+                    srv_res.close()
+                st.session_state["cm_ultima_chave_res"] = chave_res
+                st.session_state["cm_ultima_res"] = res_sync
+                st_res.update(
+                    label=f"Resolução concluída ({res_sync['origem_resolucao']})",
+                    state="complete",
+                )
+
+        res_sync = st.session_state.get("cm_ultima_res") or {}
+        if res_sync.get("encontrada"):
+            st.success(
+                f"📜 **Base Legal Vigente ({res_sync.get('origem_resolucao')}):** `{res_sync.get('base_legal') or 'RICMS'}` | "
+                f"**IVA-ST Original:** `{float(res_sync.get('iva_st_original') or 0):.2f}%`"
+            )
+        else:
+            st.error(
+                f"🚫 **SEM_REGRA_LEGAL** para o NCM `{ncm}` ({uf_orig} → {uf_dest_res}) no SQLite local e nas fontes oficiais. "
+                "Não é permitido presumir Tributado Integralmente sem comprovação normativa."
+            )
 
         destinos_tuple = tuple(destinos_param) if destinos_param else None
         pre_val = _cache_pre_validacao(db_path, (ncm,), uf_orig, data_ref.isoformat())

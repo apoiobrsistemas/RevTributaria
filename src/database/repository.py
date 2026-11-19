@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from datetime import date
 from typing import Any
+
+
+def normalizar_ncm(valor: str | None) -> str:
+    """Remove pontos/traços e retorna apenas dígitos do NCM."""
+    return re.sub(r"\D", "", str(valor or ""))
+
+
+def normalizar_cest(valor: str | None) -> str:
+    """Remove pontos/traços e retorna apenas dígitos do CEST."""
+    return re.sub(r"\D", "", str(valor or ""))
 
 TABELAS_REGRAS_PERMITIDAS = frozenset(
     {
@@ -48,55 +60,74 @@ def buscar_regra_estadual_icms(
     origem_mercadoria: str = "0",
     data_referencia: date | str | None = None,
     apenas_aceitas: bool = False,
+    permitir_regra_geral_uf: bool = True,
 ) -> dict[str, Any] | None:
-    """Busca a regra estadual de ICMS ativa mais específica e vigente."""
+    """Busca hierárquica em 5 camadas (NCM+CEST -> NCM -> Prefixo 6/4 -> Segmento CEST -> Regra Geral UF)."""
     ref = _iso_date(data_referencia)
     contrib = 1 if operacao_com_contribuinte else 0
+    ncm_limpo = normalizar_ncm(ncm)
+    cest_limpo = normalizar_cest(cest)
+    uf_o = uf_origem.upper()[:2]
+    uf_d = uf_destino.upper()[:2]
+    filtro_status = "AND status_validacao = 'ACEITO'" if apenas_aceitas else "AND status_validacao != 'REJEITADO'"
 
-    sql = """
-        SELECT *
+    base_where = f"""
         FROM regras_estaduais_icms
         WHERE status_registro = 'ATIVA'
           AND uf_origem = ?
           AND uf_destino = ?
           AND natureza_operacao = ?
           AND operacao_com_contribuinte = ?
-          AND (ncm = ? OR ncm = '')
-          AND (cest = ? OR cest = '')
           AND (origem_mercadoria = ? OR origem_mercadoria = '*')
           AND vigencia_inicio <= ?
           AND (vigencia_fim IS NULL OR vigencia_fim >= ?)
+          {filtro_status}
     """
-    params: list[Any] = [
-        uf_origem.upper(),
-        uf_destino.upper(),
-        natureza_operacao,
-        contrib,
-        ncm,
-        cest,
-        origem_mercadoria,
-        ref,
-        ref,
-    ]
+    base_params: list[Any] = [uf_o, uf_d, natureza_operacao, contrib, origem_mercadoria, ref, ref]
+    order_tail = "ORDER BY CASE WHEN origem_mercadoria = ? THEN 1 ELSE 0 END DESC, margem_st DESC, vigencia_inicio DESC, id DESC LIMIT 1"
 
-    if apenas_aceitas:
-        sql += " AND status_validacao = 'ACEITO'"
-    else:
-        sql += " AND status_validacao != 'REJEITADO'"
+    def _exec(extra_where: str, extra_params: list[Any], camada: int, generica: bool = False) -> dict[str, Any] | None:
+        sql = f"SELECT * {base_where} {extra_where} {order_tail}"
+        row = conn.execute(sql, base_params + extra_params + [origem_mercadoria]).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["camada_resolucao"] = camada
+        d["regra_generica_uf"] = generica
+        return d
 
-    sql += """
-        ORDER BY
-            CASE WHEN ncm = ? THEN 1 ELSE 0 END DESC,
-            CASE WHEN cest != '' AND cest = ? THEN 1 ELSE 0 END DESC,
-            CASE WHEN origem_mercadoria = ? THEN 1 ELSE 0 END DESC,
-            vigencia_inicio DESC,
-            id DESC
-        LIMIT 1
-    """
-    params.extend([ncm, cest, origem_mercadoria])
+    # Camada 1: UF + NCM (8 dígitos) + CEST (7 dígitos)
+    if ncm_limpo and cest_limpo:
+        r = _exec("AND REPLACE(ncm, '.', '') = ? AND REPLACE(cest, '.', '') = ?", [ncm_limpo, cest_limpo], 1)
+        if r:
+            return r
 
-    row = conn.execute(sql, params).fetchone()
-    return dict(row) if row is not None else None
+    # Camada 2: UF + NCM (8 dígitos), independente de CEST
+    if ncm_limpo:
+        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo], 2)
+        if r:
+            return r
+
+    # Camada 3: UF + prefixo NCM (regra cadastrada por posição SH 6 dígitos ou capítulo/posição 4 dígitos)
+    if len(ncm_limpo) >= 6:
+        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo[:6]], 3)
+        if r:
+            return r
+    if len(ncm_limpo) >= 4:
+        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo[:4]], 3)
+        if r:
+            return r
+
+    # Camada 4: UF + segmento CEST (apenas regra de segmento sem NCM específico)
+    if len(cest_limpo) >= 2:
+        r = _exec("AND ncm = '' AND REPLACE(cest, '.', '') LIKE ?", [f"{cest_limpo[:2]}%"], 4)
+        if r:
+            return r
+
+    # Camada 5: UF + regra geral (apenas alíquota modal; nunca presumir ausência de ST)
+    if permitir_regra_geral_uf:
+        return _exec("AND ncm = ''", [], 5, generica=True)
+    return None
 
 
 def buscar_regra_federal(
@@ -110,18 +141,20 @@ def buscar_regra_federal(
 ) -> dict[str, Any] | None:
     """Busca a regra federal ativa (IPI, PIS/COFINS, IBS/CBS) mais específica."""
     ref = _iso_date(data_referencia)
+    ncm_limpo = normalizar_ncm(ncm)
+    cest_limpo = normalizar_cest(cest)
 
     sql = """
         SELECT *
         FROM regras_federais
         WHERE status_registro = 'ATIVA'
-          AND ncm = ?
-          AND (cest = ? OR cest = '')
+          AND REPLACE(ncm, '.', '') = ?
+          AND (REPLACE(cest, '.', '') = ? OR cest = '')
           AND (ex_tipi = ? OR ex_tipi = '')
           AND vigencia_inicio <= ?
           AND (vigencia_fim IS NULL OR vigencia_fim >= ?)
     """
-    params: list[Any] = [ncm, cest, ex_tipi, ref, ref]
+    params: list[Any] = [ncm_limpo, cest_limpo, ex_tipi, ref, ref]
 
     if apenas_aceitas:
         sql += " AND status_validacao = 'ACEITO'"

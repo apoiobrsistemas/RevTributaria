@@ -31,6 +31,7 @@ from src.legislation.official_catalog import (
     MAPA_8_PORTAIS_SP,
     garantir_fontes_oficiais,
 )
+from src.legislation.official_st_resolver import extrair_regra_st_texto_oficial
 from src.legislation.url_guard import (
     URL_OFICIAL_REGEX,
     DominioNaoOficialError,

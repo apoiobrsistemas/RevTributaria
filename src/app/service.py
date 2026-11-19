@@ -2969,6 +2969,154 @@ class RevTributariaService:
         )
         return classificar_confiabilidade_deterministica(reg)
 
+    def resolver_ou_sincronizar_regra_ncm(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str = "SP",
+        uf_destino: str = "SP",
+        cest: str = "",
+        data_referencia: str | None = None,
+        fetcher: Callable[[str], bytes] | None = None,
+        textos_oficiais: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Normaliza NCM/CEST, busca em 5 camadas no SQLite e sincroniza on-demand nas fontes oficiais se ausente."""
+        from src.database.repository import normalizar_cest, normalizar_ncm
+        from src.legislation.official_st_resolver import extrair_regra_st_texto_oficial
+
+        conn = self._get_conn()
+        ncm_limpo = normalizar_ncm(ncm)
+        cest_limpo = normalizar_cest(cest)
+        uf_o = uf_origem.strip().upper()[:2]
+        uf_d = uf_destino.strip().upper()[:2]
+        ref = data_referencia or date.today().isoformat()
+
+        # Camadas 1 a 4 (sem regra genérica modal de UF)
+        reg_local = buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_limpo,
+            cest=cest_limpo,
+            data_referencia=ref,
+            permitir_regra_geral_uf=False,
+        ) or buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_o,
+            ncm=ncm_limpo,
+            cest=cest_limpo,
+            data_referencia=ref,
+            permitir_regra_geral_uf=False,
+        )
+        if reg_local is not None:
+            return {
+                "encontrada": True,
+                "origem_resolucao": "CACHE_LOCAL",
+                "ncm_normalizado": ncm_limpo,
+                "regra": reg_local,
+                "base_legal": str(reg_local.get("dispositivo_legal") or ""),
+                "iva_st_original": float(reg_local.get("margem_st") or 0.0),
+            }
+
+        # Passo 2: Sincronização automática on-demand nas fontes oficiais (.gov.br/.leg.br)
+        candidatos_texto: list[dict[str, str]] = list(textos_oficiais or [])
+        if not candidatos_texto:
+            self.garantir_catalogo_fontes_oficiais()
+            fontes_uf = conn.execute(
+                """
+                SELECT url_oficial, numero_norma FROM fontes_legais
+                WHERE ativa = 1 AND (uf = ? OR uf = ? OR uf = 'BR')
+                ORDER BY CASE WHEN tipo_norma LIKE '%PORTARIA%' THEN 0 ELSE 1 END, id ASC
+                LIMIT 10
+                """,
+                (uf_o, uf_d),
+            ).fetchall()
+            fn_fetch = fetcher or baixar_bytes_oficiais
+            for f_row in fontes_uf:
+                try:
+                    raw = fn_fetch(str(f_row["url_oficial"]))
+                    txt = raw.decode("utf-8", errors="ignore")
+                    candidatos_texto.append(
+                        {
+                            "texto": txt,
+                            "url": str(f_row["url_oficial"]),
+                            "numero_norma": str(f_row["numero_norma"] or ""),
+                        }
+                    )
+                except Exception:
+                    continue
+
+        regra_extraida: dict[str, Any] | None = None
+        for cand in candidatos_texto:
+            regra_extraida = extrair_regra_st_texto_oficial(
+                cand.get("texto", ""),
+                ncm=ncm_limpo,
+                uf=uf_d,
+                fonte_url=cand.get("url", "https://legislacao.fazenda.sp.gov.br/Paginas/Portarias.aspx"),
+                numero_norma=cand.get("numero_norma", ""),
+            )
+            if regra_extraida is not None:
+                break
+
+        if regra_extraida is None:
+            return {
+                "encontrada": False,
+                "origem_resolucao": "SEM_REGRA_LEGAL",
+                "ncm_normalizado": ncm_limpo,
+                "regra": None,
+                "base_legal": "",
+                "iva_st_original": 0.0,
+            }
+
+        # Persiste regra extraída no SQLite local com status A_CONFERIR para aceite fiscal
+        cest_ext = regra_extraida.get("cest") or cest_limpo
+        tem_st_ext = int(regra_extraida.get("tem_st") or 0)
+        cst_ext = "10" if tem_st_ext else "00"
+        cfop_ext = "5403" if (tem_st_ext and uf_o == uf_d) else ("6403" if tem_st_ext else ("5102" if uf_o == uf_d else "6102"))
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO regras_estaduais_icms (
+                    uf_origem, uf_destino, ncm, cest, natureza_operacao, operacao_com_contribuinte,
+                    origem_mercadoria, vigencia_inicio, cfop, cst_icms, aliquota_icms,
+                    aliquota_icms_st, margem_st, dispositivo_legal, trecho_citado,
+                    confianca_ia, status_validacao
+                ) VALUES (?, ?, ?, ?, 'VENDA', 1, '*', ?, ?, ?, ?, ?, ?, ?, ?, 'ALTA', 'A_CONFERIR')
+                """,
+                (
+                    uf_o,
+                    uf_d,
+                    ncm_limpo,
+                    cest_ext,
+                    ref,
+                    cfop_ext,
+                    cst_ext,
+                    float(regra_extraida["aliquota_icms"]),
+                    float(regra_extraida["aliquota_icms_st"]),
+                    float(regra_extraida["margem_st"]),
+                    str(regra_extraida["dispositivo_legal"]),
+                    str(regra_extraida["trecho_citado"]),
+                ),
+            )
+        reg_salva = buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_limpo,
+            cest=cest_ext,
+            data_referencia=ref,
+            permitir_regra_geral_uf=False,
+        )
+        return {
+            "encontrada": True,
+            "origem_resolucao": "SYNC_OFICIAL_TEMPO_REAL",
+            "ncm_normalizado": ncm_limpo,
+            "regra": reg_salva,
+            "base_legal": str(regra_extraida["dispositivo_legal"]),
+            "iva_st_original": float(regra_extraida["margem_st"]),
+        }
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""

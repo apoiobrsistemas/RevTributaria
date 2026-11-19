@@ -66,6 +66,15 @@ CATALOGO_FONTES_OFICIAIS: list[dict[str, Any]] = [
     {
         "uf": "SP",
         "esfera": "ESTADUAL",
+        "tipo_norma": "PORTARIA_SRE_ST",
+        "numero_norma": "Portarias SRE/CAT IVA-ST",
+        "titulo": "SEFAZ-SP — Portarias SRE/CAT Vigentes de Substituição Tributária e IVA-ST",
+        "url_oficial": "https://legislacao.fazenda.sp.gov.br/Paginas/Portarias.aspx",
+        "cobertura": "Portarias SRE vigentes de MVA/IVA-ST (ex.: SRE 12/2026, SRE 88/2025, SRE 05/2026)",
+    },
+    {
+        "uf": "SP",
+        "esfera": "ESTADUAL",
         "tipo_norma": "RESPOSTA_CONSULTA",
         "numero_norma": "Respostas à Consulta SEFAZ-SP",
         "titulo": "Respostas à Consulta Tributária — Consultoria Tributária SEFAZ-SP",

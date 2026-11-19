@@ -1036,7 +1036,7 @@ def gerar_matriz_consolidada_ncm(
     ncm: str,
     uf_origem: str,
     uf_destino: str,
-    regra_estadual: Mapping[str, Any],
+    regra_estadual: Mapping[str, Any] | None,
     regra_federal: Mapping[str, Any] | None = None,
     regime_tributario: str = "Lucro Real",
     atividade_empresa: str = "Varejo (Padrão)",
@@ -1046,9 +1046,34 @@ def gerar_matriz_consolidada_ncm(
     """Gera visão técnica com Desdobramento Condicional Mínimo (Zero Ruído / Zero Linhas Fantasmas)."""
     uf_o = uf_origem.upper()[:2]
     uf_d = uf_destino.upper()[:2]
+    ncm_limpo = "".join(c for c in str(ncm or "") if c.isdigit()).zfill(8)[:8]
+    if not regra_estadual or bool(regra_estadual.get("regra_generica_uf")):
+        return [
+            {
+                "Cenário / Nomenclatura Fiscal": f"[SEM_REGRA_LEGAL] NCM {ncm_limpo} ({uf_o} -> {uf_d}) — Verificar norma oficial da UF",
+                "Sentido": "-",
+                "Natureza de Operação": "SEM_REGRA_LEGAL",
+                "Perfil Destinatário/Remetente": "-",
+                "NCM": ncm_limpo,
+                "CEST": "",
+                "Origem": "-",
+                "Regime Tributário": regime_tributario,
+                "Enquadramento ICMS": "SEM_REGRA_LEGAL",
+                "Tem ST?": "Não",
+                "MVA Original (%)": 0.0,
+                "MVA Ajustada Nacional (%)": 0.0,
+                "MVA Ajustada Importado 4% (%)": 0.0,
+                "MVA Simples Nacional (%)": 0.0,
+                "Fonte Oficial (.gov.br)": "https://legislacao.fazenda.sp.gov.br/Paginas/Portarias.aspx",
+                "Observação Padrão NF-e": "Nenhuma regra específica encontrada no SQLite nem nas fontes oficiais; não é permitido presumir Tributado Integralmente.",
+                "Selo Confiabilidade": "A Conferir",
+                "Validação NT SEFAZ": "SEM_REGRA_LEGAL",
+            }
+        ]
+
     interestadual = uf_o != uf_d
     cest = str(regra_estadual.get("cest") or "")
-    tem_st = bool(regra_estadual.get("tem_st"))
+    tem_st = bool(regra_estadual.get("tem_st") or float(_dec(regra_estadual.get("margem_st"), "0")) > 0 or float(_dec(regra_estadual.get("aliquota_icms_st"), "0")) > 0)
     coexiste_trib = bool(regra_estadual.get("coexiste_tributado"))
     aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
     aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
