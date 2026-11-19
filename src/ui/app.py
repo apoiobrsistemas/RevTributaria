@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 _ROOT_DIR = str(Path(__file__).resolve().parent.parent.parent)
@@ -91,6 +92,30 @@ def _limpar_cache() -> None:
     st.cache_data.clear()
 
 
+_ROTINA_BG_STARTED: set[str] = set()
+
+
+def _iniciar_rotina_diaria_background(db_path: str) -> None:
+    """Dispara a rotina diária (.gov.br + Vigia) em background sem travar a abertura da tela."""
+    from datetime import date
+
+    chave = f"{db_path}|{date.today().isoformat()}"
+    if chave in _ROTINA_BG_STARTED:
+        return
+    _ROTINA_BG_STARTED.add(chave)
+
+    def _worker() -> None:
+        srv_bg = RevTributariaService(db_path)
+        try:
+            srv_bg.executar_rotina_diaria_ao_abrir(uf_origem="SP")
+        except Exception:
+            pass
+        finally:
+            srv_bg.close()
+
+    threading.Thread(target=_worker, daemon=True, name="revtributaria-rotina-diaria").start()
+
+
 def _render_sidebar(db_path: str) -> tuple[str, str]:
     st.sidebar.markdown(
         '<div class="rev-brand notranslate" translate="no">'
@@ -103,33 +128,19 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
         unsafe_allow_html=True,
     )
 
-    rotina_slot = st.sidebar.empty()
     if not st.session_state.get("rotina_diaria_verificada_sessao"):
-        with rotina_slot.status("🔄 Verificando atualizações oficiais do dia...", expanded=False) as st_dia:
-            srv_dia = RevTributariaService(db_path)
-            try:
-                if hasattr(srv_dia, "restaurar_snapshot_cloud"):
-                    snap_res = srv_dia.restaurar_snapshot_cloud()
-                else:
-                    srv_dia.close()
-                    snap_res = restaurar_snapshot_se_necessario(db_path)
-                if snap_res.get("restaurado"):
-                    _limpar_cache()
-                try:
-                    res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
-                except Exception:
-                    res_dia = {"executado_agora": False, "ultima_data": "Hoje", "resumo": {}}
-                st.session_state["rotina_diaria_verificada_sessao"] = True
-                st.session_state["rotina_diaria_info"] = res_dia
-                if res_dia.get("executado_agora"):
-                    _limpar_cache()
-                st_dia.update(
-                    label=f"Base sincronizada ({res_dia['ultima_data']})",
-                    state="complete",
-                )
-            finally:
-                srv_dia.close()
-        rotina_slot.empty()
+        srv_dia = RevTributariaService(db_path)
+        try:
+            if hasattr(srv_dia, "restaurar_snapshot_cloud"):
+                snap_res = srv_dia.restaurar_snapshot_cloud()
+            else:
+                snap_res = restaurar_snapshot_se_necessario(db_path)
+            if snap_res.get("restaurado"):
+                _limpar_cache()
+        finally:
+            srv_dia.close()
+        _iniciar_rotina_diaria_background(db_path)
+        st.session_state["rotina_diaria_verificada_sessao"] = True
 
     st.sidebar.markdown(
         '<div class="rev-sync-banner notranslate" translate="no">'
