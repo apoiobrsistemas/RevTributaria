@@ -555,3 +555,9 @@ CREATE TABLE IF NOT EXISTS acervo_documental (
 
 CREATE INDEX IF NOT EXISTS idx_acervo_busca
     ON acervo_documental (esfera, tipo_documento, status_norma, codigo_ato);
+
+CREATE TABLE IF NOT EXISTS naturezas_operacao_ids (
+    natureza_operacao TEXT PRIMARY KEY,
+    id_natureza       INTEGER NOT NULL DEFAULT 0,
+    atualizado_em     TEXT NOT NULL DEFAULT (datetime('now'))
+);

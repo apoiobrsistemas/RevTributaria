@@ -90,3 +90,41 @@ def test_template_padrao_e_importacao_lote_xlsx_e_csv():
         assert regras_rj[0]["margem_st"] == 49.0
     finally:
         srv.close()
+
+
+def test_ids_naturezas_operacao_persistencia_e_coluna(tmp_path):
+    db_file = tmp_path / "nat_ids.db"
+    srv = RevTributariaService(db_file)
+    try:
+        iniciais = srv.listar_ids_naturezas_operacao()
+        assert len(iniciais) == 8
+        assert iniciais["Venda de Mercadorias"] == 0
+
+        salvos = srv.salvar_ids_naturezas_operacao(
+            {"Venda de Mercadorias": 3, "Outras Saídas": 72}
+        )
+        assert salvos["Venda de Mercadorias"] == 3
+        assert salvos["Outras Saídas"] == 72
+
+        # Altera novamente (3 -> 25) e valida persistência em nova instância
+        srv.salvar_ids_naturezas_operacao({"Venda de Mercadorias": 25})
+    finally:
+        srv.close()
+
+    srv2 = RevTributariaService(db_file)
+    try:
+        carregados = srv2.listar_ids_naturezas_operacao()
+        assert carregados["Venda de Mercadorias"] == 25
+        assert carregados["Outras Saídas"] == 72
+
+        linhas = [
+            {"Regime Tributário": "Lucro Real", "NCM": "85071090", "Natureza de Operação": "Venda de Mercadorias", "CFOP": "5.102"},
+            {"Regime Tributário": "Lucro Real", "NCM": "85071090", "Natureza de Operação": "Outras Saídas", "CFOP": "5.949"},
+        ]
+        com_ids = RevTributariaService.aplicar_ids_natureza_nas_linhas(linhas, carregados)
+        chaves = list(com_ids[0].keys())
+        assert chaves.index("ID Natureza") == chaves.index("Natureza de Operação") - 1
+        assert com_ids[0]["ID Natureza"] == 25
+        assert com_ids[1]["ID Natureza"] == 72
+    finally:
+        srv2.close()

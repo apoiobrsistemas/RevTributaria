@@ -175,6 +175,60 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         f"{pre_val['ncms_alerta']} Alerta(s), {pre_val['ncms_bloqueio']} Bloqueio(s)."
     )
 
+    # Mapeamento configurável de IDs por Natureza de Operação (persistido no banco)
+    srv_nat = RevTributariaService(db_path)
+    try:
+        ids_salvos = srv_nat.listar_ids_naturezas_operacao()
+    finally:
+        srv_nat.close()
+
+    # Garante que todas as naturezas presentes na consulta apareçam na lista (1x cada)
+    naturezas_ordem = list(ids_salvos.keys())
+    for l in linhas:
+        nat_linha = str(l.get("Natureza de Operação") or "").strip()
+        if nat_linha and nat_linha not in ids_salvos:
+            ids_salvos[nat_linha] = 0
+            naturezas_ordem.append(nat_linha)
+
+    with st.expander("🔢 Configurar IDs das Naturezas de Operação (Sistema de Terceiros)", expanded=False):
+        st.caption(
+            "Informe o código/ID numérico de cada Natureza de Operação no seu sistema de destino. "
+            "Os números ficam salvos automaticamente e aparecem na coluna 'ID Natureza' ao lado da Natureza (na tela e nos arquivos exportados)."
+        )
+        h_nat, h_id = st.columns([3, 1.2])
+        h_nat.markdown("**Natureza de Operação**")
+        h_id.markdown("**ID da Natureza**")
+        novos_ids: dict[str, int] = {}
+        for idx_nat, nat_nome in enumerate(naturezas_ordem):
+            col_n, col_v = st.columns([3, 1.2])
+            col_n.text_input(
+                "Natureza",
+                value=nat_nome,
+                disabled=True,
+                label_visibility="collapsed",
+                key=f"cm_nat_nome_{idx_nat}",
+            )
+            novos_ids[nat_nome] = int(
+                col_v.number_input(
+                    f"ID {nat_nome}",
+                    min_value=0,
+                    step=1,
+                    value=int(ids_salvos.get(nat_nome, 0)),
+                    label_visibility="collapsed",
+                    key=f"cm_nat_id_{idx_nat}",
+                )
+            )
+
+        if novos_ids != ids_salvos:
+            srv_save = RevTributariaService(db_path)
+            try:
+                ids_salvos = srv_save.salvar_ids_naturezas_operacao(novos_ids)
+            finally:
+                srv_save.close()
+            st.toast("IDs das Naturezas salvos automaticamente.", icon="✅")
+
+    linhas = RevTributariaService.aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
+
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)
     ops = [
