@@ -29,10 +29,15 @@ from src.integrations.microvix_conciliador import (
     sanitizar_celula_planilha,
 )
 from src.integrations.microvix_config_exporter import (
+    COLUNAS_MATRIZ_NCM_69,
     COLUNAS_MICROVIX_71,
     SHEET_NAME_MICROVIX,
+    exportar_matriz_ncm_69_csv,
+    exportar_matriz_ncm_69_xlsx,
     exportar_microvix_xlsx,
     gerar_linhas_microvix,
+    normalizar_linhas_matriz_69,
+    validar_matriz_ncm_69,
     validar_planilha_microvix,
 )
 from src.integrations.nfe_collector import (
@@ -49,6 +54,7 @@ from src.integrations.xml_entrada_parser import (
 
 __all__ = [
     "COLUNAS_LAYOUT_LINX_TERCEIRO",
+    "COLUNAS_MATRIZ_NCM_69",
     "COLUNAS_MICROVIX_71",
     "METODOS_SUPORTADOS",
     "MICROVIX_ENDPOINT",
@@ -61,7 +67,11 @@ __all__ = [
     "converter_linhas_para_layout_linx_terceiro",
     "exportar_layout_linx_terceiro_csv",
     "exportar_layout_linx_terceiro_xlsx",
+    "exportar_matriz_ncm_69_csv",
+    "exportar_matriz_ncm_69_xlsx",
     "exportar_microvix_xlsx",
+    "normalizar_linhas_matriz_69",
+    "validar_matriz_ncm_69",
     "exportar_relatorio_auditoria_lote_xlsx",
     "extrair_metadados_emitente_xml",
     "gerar_linhas_microvix",

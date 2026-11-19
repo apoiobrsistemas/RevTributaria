@@ -104,3 +104,41 @@ def test_modo_nacional_27_ufs_5_ids_270_linhas_e_xlsx_valido(tmp_path: Path) -> 
         assert ws.cell(row=2, column=9).number_format == "0.00"  # Alíquota ICMS
     finally:
         conn.close()
+
+
+def test_exportador_matriz_ncm_69_campos_completos(tmp_path: Path) -> None:
+    from src.engine.matrix_generator import gerar_matriz_ncm
+    from src.integrations.microvix_config_exporter import (
+        COLUNAS_MATRIZ_NCM_69,
+        exportar_matriz_ncm_69_csv,
+        exportar_matriz_ncm_69_xlsx,
+        validar_matriz_ncm_69,
+    )
+
+    assert len(COLUNAS_MATRIZ_NCM_69) == 69
+    assert COLUNAS_MATRIZ_NCM_69[0] == "Regime Tributário"
+    assert COLUNAS_MATRIZ_NCM_69[-1] == "Observações"
+
+    linhas = gerar_matriz_ncm(
+        ncm="85071090",
+        uf_origem="SP",
+        uf_destino="RJ",
+        regra_estadual={"aliquota_interna": 18, "mva_original": 40, "tem_st": 1, "cest": "0100100"},
+    )
+    assert len(linhas) > 0
+
+    val = validar_matriz_ncm_69(linhas)
+    assert val["valido"] is True
+
+    xlsx_bytes = exportar_matriz_ncm_69_xlsx(linhas)
+    val_xlsx = validar_matriz_ncm_69(xlsx_bytes)
+    assert val_xlsx["valido"] is True
+
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    ws = wb[SHEET_NAME_MICROVIX]
+    headers = [ws.cell(row=1, column=c).value for c in range(1, 70)]
+    assert tuple(headers) == COLUNAS_MATRIZ_NCM_69
+
+    csv_bytes = exportar_matriz_ncm_69_csv(linhas)
+    assert b"Regime Tribut" in csv_bytes
+    assert b"Observa" in csv_bytes
