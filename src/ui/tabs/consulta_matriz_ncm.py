@@ -27,6 +27,10 @@ from src.engine.reforma_tributaria_engine import (
     calcular_transicao_lc214,
 )
 from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
+from src.integrations.linx_terceiro_exporter import (
+    exportar_layout_linx_terceiro_csv,
+    exportar_layout_linx_terceiro_xlsx,
+)
 from src.integrations.microvix_conciliador import (
     conciliar_lote_com_microvix,
     exportar_relatorio_auditoria_lote_xlsx,
@@ -562,6 +566,48 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         txt_bytes = "\n".join(linhas_txt).encode("utf-8")
 
         st.markdown("#### 📤 Exportar Resultado")
+        lx1, lx2, lx3 = st.columns([1.0, 1.4, 1.4])
+        id_cfg_ini = int(
+            lx1.number_input(
+                "ID Config Inicial (Linx)",
+                min_value=1,
+                step=1,
+                value=1,
+                key="cm_linx_id_cfg",
+            )
+        )
+        linx_csv_bytes = exportar_layout_linx_terceiro_csv(
+            filtradas,
+            id_config_inicial=id_cfg_ini,
+            ids_natureza=ids_salvos,
+        )
+        lx2.download_button(
+            "📥 Exportar Padrão Linx Terceiros (.csv)",
+            data=linx_csv_bytes,
+            file_name=f"linx_terceiros_{nome_base}.csv",
+            mime="text/csv",
+            key="cm_dl_linx_csv",
+            use_container_width=True,
+        )
+        if lx3.button("⚙️ Gerar Padrão Linx Terceiros (.xlsx)", key="cm_prep_linx_xlsx", use_container_width=True):
+            with st.spinner("Gerando planilha no layout oficial Linx (71 colunas)..."):
+                st.session_state["cm_linx_xlsx_bytes"] = exportar_layout_linx_terceiro_xlsx(
+                    filtradas,
+                    id_config_inicial=id_cfg_ini,
+                    ids_natureza=ids_salvos,
+                )
+                st.session_state["cm_linx_xlsx_name"] = f"linx_terceiros_{nome_base}.xlsx"
+
+        if st.session_state.get("cm_linx_xlsx_bytes") and st.session_state.get("cm_linx_xlsx_name") == f"linx_terceiros_{nome_base}.xlsx":
+            st.download_button(
+                "📥 Baixar Padrão Linx Terceiros (.xlsx)",
+                data=st.session_state["cm_linx_xlsx_bytes"],
+                file_name=st.session_state["cm_linx_xlsx_name"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_linx_xlsx",
+                use_container_width=True,
+            )
+
         ex1, ex2, ex3 = st.columns(3)
         ex1.download_button(
             "📥 Baixar CSV (.csv)",

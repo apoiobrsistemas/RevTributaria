@@ -72,6 +72,8 @@ from src.integrations import (
     MicrovixClient,
     conciliar_lote_com_microvix,
     consultar_regime_cnpj,
+    exportar_layout_linx_terceiro_csv,
+    exportar_layout_linx_terceiro_xlsx,
     exportar_relatorio_auditoria_lote_xlsx,
     extrair_metadados_emitente_xml,
     importar_planilha_matriz_erp,
@@ -2523,6 +2525,34 @@ class RevTributariaService:
     ) -> bytes:
         """Exporta relatório executivo (.xlsx) em 4 abas com sanitização anti-Formula Injection."""
         return exportar_relatorio_auditoria_lote_xlsx(resultado_lote, divergencias_erp)
+
+    def exportar_linx_terceiro_xlsx(
+        self,
+        linhas: list[dict[str, Any]],
+        *,
+        id_config_inicial: int = 1,
+    ) -> bytes:
+        """Exporta no modelo oficial de importação Config. Tributária Linx (71 colunas .xlsx)."""
+        ids_nat = self.listar_ids_naturezas_operacao()
+        return exportar_layout_linx_terceiro_xlsx(
+            linhas,
+            id_config_inicial=id_config_inicial,
+            ids_natureza=ids_nat,
+        )
+
+    def exportar_linx_terceiro_csv(
+        self,
+        linhas: list[dict[str, Any]],
+        *,
+        id_config_inicial: int = 1,
+    ) -> bytes:
+        """Exporta no modelo oficial de importação Config. Tributária Linx (71 colunas .csv)."""
+        ids_nat = self.listar_ids_naturezas_operacao()
+        return exportar_layout_linx_terceiro_csv(
+            linhas,
+            id_config_inicial=id_config_inicial,
+            ids_natureza=ids_nat,
+        )
 
     def restaurar_snapshot_cloud(self) -> dict[str, Any]:
         """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""

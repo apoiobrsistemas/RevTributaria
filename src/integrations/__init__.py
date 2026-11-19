@@ -11,6 +11,12 @@ from src.integrations.linx_microvix import (
     parsear_resposta_microvix,
     sincronizar_metodo,
 )
+from src.integrations.linx_terceiro_exporter import (
+    COLUNAS_LAYOUT_LINX_TERCEIRO,
+    converter_linhas_para_layout_linx_terceiro,
+    exportar_layout_linx_terceiro_csv,
+    exportar_layout_linx_terceiro_xlsx,
+)
 from src.integrations.matriz_parser import (
     identificar_perna_operacao,
     importar_planilha_matriz_erp,
@@ -35,6 +41,7 @@ from src.integrations.xml_entrada_parser import (
 )
 
 __all__ = [
+    "COLUNAS_LAYOUT_LINX_TERCEIRO",
     "METODOS_SUPORTADOS",
     "MICROVIX_ENDPOINT",
     "MicrovixClient",
@@ -42,6 +49,9 @@ __all__ = [
     "XMLSegurancaError",
     "conciliar_lote_com_microvix",
     "consultar_regime_cnpj",
+    "converter_linhas_para_layout_linx_terceiro",
+    "exportar_layout_linx_terceiro_csv",
+    "exportar_layout_linx_terceiro_xlsx",
     "exportar_relatorio_auditoria_lote_xlsx",
     "extrair_metadados_emitente_xml",
     "identificar_perna_operacao",
