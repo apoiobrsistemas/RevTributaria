@@ -2875,6 +2875,43 @@ class RevTributariaService:
             ).fetchall()
         ]
 
+    def consultar_matriz_consolidada_ncm(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str,
+        uf_destino: str = "RJ",
+        data_referencia: str | None = None,
+        regime_tributario: str = "Lucro Real",
+        atividade_empresa: str = "Varejo (Padrão)",
+    ) -> list[dict[str, Any]]:
+        """Retorna visão técnica consolidada (Entrada & Saída) com todas as colunas de MVA/ST/DIFAL/ERP."""
+        from src.engine.matrix_generator import gerar_matriz_consolidada_ncm
+
+        conn = self._get_conn()
+        ref = data_referencia or date.today().isoformat()
+        regra_est = self.buscar_regra_estadual_vigente(
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            ncm=ncm,
+            data_referencia=ref,
+        )
+        if not regra_est:
+            return []
+        regra_fed = conn.execute(
+            "SELECT * FROM regras_federais_ncm WHERE ncm = ? ORDER BY id DESC LIMIT 1",
+            (ncm.strip(),),
+        ).fetchone()
+        return gerar_matriz_consolidada_ncm(
+            ncm=ncm.strip(),
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            regra_estadual=dict(regra_est),
+            regra_federal=dict(regra_fed) if regra_fed else None,
+            regime_tributario=regime_tributario,
+            atividade_empresa=atividade_empresa,
+        )
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""

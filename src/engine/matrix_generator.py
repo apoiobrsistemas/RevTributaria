@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Mapping
 
+from src.engine.fiscal_engine import ALIQUOTAS_INTERNAS_UF
 from src.engine.fiscal_math import _dec, aliquota_interestadual, calcular_mva_ajustado
 
 REGIMES_TRIBUTARIOS_EMPRESA: tuple[str, ...] = (
@@ -1027,3 +1028,174 @@ def validar_linhas_matriz_sre_70(linhas: list[dict[str, Any]]) -> list[dict[str,
         elif cst_2d in {"00", "10", "60"} and cbenef:
             row["Código Beneficio Fiscal"] = ""
     return linhas
+
+
+def gerar_matriz_consolidada_ncm(
+    ncm: str,
+    uf_origem: str,
+    uf_destino: str,
+    regra_estadual: Mapping[str, Any],
+    regra_federal: Mapping[str, Any] | None = None,
+    regime_tributario: str = "Lucro Real",
+    atividade_empresa: str = "Varejo (Padrão)",
+) -> list[dict[str, Any]]:
+    """Gera visão técnica unificada com TODAS as Naturezas de Entrada e Saída e colunas completas de MVA/ST/DIFAL/ERP."""
+    uf_o = uf_origem.upper()[:2]
+    uf_d = uf_destino.upper()[:2]
+    cest = str(regra_estadual.get("cest") or "")
+    tem_st = bool(regra_estadual.get("tem_st"))
+    aliq_uf_o, fcp_uf_o = ALIQUOTAS_INTERNAS_UF.get(uf_o, (Decimal("18.00"), Decimal("0.00")))
+    aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
+    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
+    aliq_fcp = float(_dec(regra_estadual.get("aliquota_fcp"), str(fcp_uf_d)))
+    red_bc = float(_dec(regra_estadual.get("reducao_base_icms"), "0"))
+    aliq_st = float(_dec(regra_estadual.get("aliquota_icms_st"), str(aliq_interna)))
+    mva_orig = float(_dec(regra_estadual.get("margem_st"), "0"))
+    red_st = float(_dec(regra_estadual.get("reducao_icms_st"), "0"))
+    carga_media = float(_dec(regra_estadual.get("percentual_carga_tributaria_media"), "0"))
+    aliq_efetivo = float(_dec(regra_estadual.get("aliquota_icms_efetivo"), "0"))
+    red_efetivo = float(_dec(regra_estadual.get("reducao_base_icms_efetivo"), "0"))
+    cbenef = str(regra_estadual.get("codigo_beneficio_fiscal") or "")
+    protocolo = str(regra_estadual.get("dispositivo_legal") or ("Convênio ICMS 142/2018" if tem_st else "-"))
+    fonte_url = str(regra_estadual.get("fonte_url") or "https://www.confaz.fazenda.gov.br/")
+    conv_52_91 = "52/91" in protocolo
+
+    aliq_inter_nac = float(aliquota_interestadual(uf_o, uf_d if uf_d != uf_o else "MG", "0", beneficio_convenio_52_91=conv_52_91) or Decimal("12.00"))
+    aliq_inter_imp4 = float(aliquota_interestadual(uf_o, uf_d if uf_d != uf_o else "MG", "2", beneficio_convenio_52_91=conv_52_91) or Decimal("4.00"))
+    mva_aj_nac = float(calcular_mva_ajustado(mva_orig, aliq_inter_nac, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if tem_st else 0.0
+    mva_aj_imp4 = float(calcular_mva_ajustado(mva_orig, aliq_inter_imp4, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if tem_st else 0.0
+    mva_sn = round(mva_orig, 2) if tem_st else 0.0
+
+    deduz_custo = _sn(regra_estadual.get("deduz_icms_fcp_custo_medio"), default=False)
+    soma_st_custo = _sn(regra_estadual.get("somar_icms_st_fcp_st_custo_medio"), default=False)
+    bc_dupla = _sn(regra_estadual.get("utiliza_bc_dupla_difal"), default=(uf_o != uf_d and uf_d != "ES"))
+    somar_ipi_difal = _sn(regra_estadual.get("somar_ipi_base_difal_fcp"), default=False)
+    cst_regra = str(regra_estadual.get("cst_icms") or "").strip()
+    cst_ibs_cbs = str((regra_federal or {}).get("cst_ibs_cbs") or "000")
+
+    naturezas_catalogo = [
+        # Entradas (1.xxx / 2.xxx / 3.xxx)
+        ("Entrada", "(E) Compra para Comercialização", "Contribuinte", "1.403" if tem_st else "1.102", "2.403" if tem_st else "2.102", tem_st, False),
+        ("Entrada", "(E) Compra para Industrialização", "Contribuinte", "1.401" if tem_st else "1.101", "2.401" if tem_st else "2.101", tem_st, False),
+        ("Entrada", "(E) Devolução de Vendas", "Contribuinte", "1.411" if tem_st else "1.202", "2.411" if tem_st else "2.202", tem_st, False),
+        ("Entrada", "(E) Compra para Uso e Consumo", "Não Contribuinte", "1.407" if tem_st else "1.556", "2.407" if tem_st else "2.556", tem_st, uf_o != uf_d),
+        ("Entrada", "(E) Compra para Ativo Imobilizado", "Não Contribuinte", "1.406" if tem_st else "1.551", "2.406" if tem_st else "2.551", tem_st, uf_o != uf_d),
+        ("Entrada", "(E) Transferência de Mercadorias", "Contribuinte", "1.409" if tem_st else "1.152", "2.409" if tem_st else "2.152", tem_st, False),
+        ("Entrada", "(E) Remessa em Bonificação", "Contribuinte", "1.910", "2.910", False, False),
+        ("Entrada", "(E) Importação Direta do Exterior", "Não Contribuinte", "3.102", "3.102", tem_st, False),
+        # Saídas (5.xxx / 6.xxx)
+        ("Saída", "(S) Venda de Mercadorias — Contribuinte", "Contribuinte", "5.405" if tem_st else "5.102", "6.403" if tem_st else "6.102", tem_st, False),
+        ("Saída", "(S) Venda de Mercadorias — Não Contribuinte", "Não Contribuinte", "5.405" if tem_st else "5.102", "6.108", tem_st, uf_o != uf_d),
+        ("Saída", "(S) Devolução de Compras", "Contribuinte", "5.411" if tem_st else "5.202", "6.411" if tem_st else "6.202", tem_st, False),
+        ("Saída", "(S) Devolução de Uso e Consumo / Ativo Imobilizado", "Contribuinte", "5.413" if tem_st else "5.556", "6.413" if tem_st else "6.556", tem_st, False),
+        ("Saída", "(S) Transferência de Mercadorias", "Contribuinte", "5.409" if tem_st else "5.152", "6.409" if tem_st else "6.152", tem_st, False),
+        ("Saída", "(S) Remessa em Bonificação", "Contribuinte", "5.910", "6.910", False, False),
+    ]
+
+    origens_cfg = [
+        ("Nacional", "0", aliq_inter_nac, mva_aj_nac),
+        ("Importado 4%", "2", aliq_inter_imp4, mva_aj_imp4),
+        ("Importado s/ Similar CAMEX", "6", aliq_inter_nac, mva_aj_nac),
+    ]
+    regimes_cfg = ["Regime Normal", "Simples Nacional"]
+
+    saida: list[dict[str, Any]] = []
+    for sentido, nat_nome, perfil, cfop_int, cfop_inter, usa_st, tem_difal in naturezas_catalogo:
+        eh_ent = sentido == "Entrada"
+        eh_imp_dir = "Importação Direta" in nat_nome
+        for reg_nome in regimes_cfg:
+            if eh_imp_dir and reg_nome == "Simples Nacional":
+                continue
+            for orig_lbl, orig_dig, aliq_inter_orig, mva_aj_orig in origens_cfg:
+                if eh_imp_dir and orig_dig == "0":
+                    continue
+                orig_ef = ("1" if orig_dig == "2" else "6") if eh_imp_dir else orig_dig
+                simples = reg_nome == "Simples Nacional"
+                fed = _dados_federais(
+                    regra_federal,
+                    eh_ent,
+                    regime_tributario="Simples Nacional" if simples else regime_tributario,
+                    eh_receita_venda=("Venda de Mercadorias" in nat_nome),
+                )
+                if usa_st:
+                    enq = "ST Retida/Destacada" if (eh_ent or cfop_inter in {"6.403", "6.411", "6.409"}) else "Substituído CST 60/500"
+                    cst_2 = "70" if red_bc > 0 else ("60" if (not eh_ent and cfop_int == "5.405") else "10")
+                    csosn_3 = "500" if cst_2 == "60" else "201"
+                elif cst_regra in {"40", "41", "50"}:
+                    enq = "Isenção/Imunidade"
+                    cst_2 = cst_regra
+                    csosn_3 = "400"
+                elif red_bc > 0:
+                    enq = "Redução de Base"
+                    cst_2 = "20"
+                    csosn_3 = "102"
+                else:
+                    enq = "Tributado Integralmente"
+                    cst_2 = "00"
+                    csosn_3 = "102"
+
+                aliq_int_ef = round(aliq_interna * (1.0 - red_bc / 100.0) + aliq_fcp, 2)
+                difal_pct = round(max(0.0, aliq_interna + aliq_fcp - aliq_inter_orig), 2) if (tem_difal and not simples) else 0.0
+                met_difal = "Base Dupla" if bc_dupla == "S" else ("Soma IPI na Base" if somar_ipi_difal == "S" else "Base Única")
+                cenario = (
+                    f"[{sentido.upper()} - {nat_nome.split(' ', 1)[-1].upper()}] NCM {ncm} | {enq} ({orig_lbl})"
+                    + (f" — MVA Ajust. {mva_aj_orig:.2f}%" if usa_st else "")
+                )
+
+                saida.append(
+                    {
+                        "Cenário / Nomenclatura Fiscal": cenario,
+                        "Sentido": sentido,
+                        "Natureza de Operação": nat_nome,
+                        "Perfil Destinatário/Remetente": perfil,
+                        "NCM": ncm,
+                        "CEST": cest,
+                        "Origem": orig_lbl,
+                        "Regime Tributário": reg_nome,
+                        "Enquadramento ICMS": enq,
+                        "CFOP Interno": cfop_int,
+                        "CFOP Interestadual": cfop_inter,
+                        "CST (Orig.CST)": "-" if simples else f"{orig_ef}.{cst_2}",
+                        "CSOSN (Orig.CSOSN)": f"{orig_ef}.{csosn_3}" if simples else f"{orig_ef}.102",
+                        "Código cBenef": cbenef,
+                        "Tem ST?": "Sim" if usa_st else "Não",
+                        "Responsável ST": "Substituído CST 60/500" if cst_2 == "60" else ("Retida pelo Remetente" if usa_st else "-"),
+                        "Protocolo / Convênio ICMS": protocolo if usa_st else "-",
+                        "MVA Original (%)": round(mva_orig, 2) if usa_st else 0.0,
+                        "MVA Ajustada Nacional (%)": round(mva_aj_nac, 2) if usa_st else 0.0,
+                        "MVA Ajustada Importado 4% (%)": round(mva_aj_imp4, 2) if usa_st else 0.0,
+                        "MVA Simples Nacional (%)": mva_sn if usa_st else 0.0,
+                        "Alíq. ST (%)": round(aliq_st, 2) if usa_st else 0.0,
+                        "Redução BC ST (%)": round(red_st, 2) if usa_st else 0.0,
+                        "FCP-ST (%)": round(aliq_fcp, 2) if usa_st else 0.0,
+                        "Carga Média / Estimativa Simplificada (%)": round(carga_media, 2) if usa_st else 0.0,
+                        "Alíq. ICMS Efetivo (%)": round(aliq_efetivo, 2) if (usa_st and cst_2 == "60") else 0.0,
+                        "Redução BC Efetivo (%)": round(red_efetivo, 2) if (usa_st and cst_2 == "60") else 0.0,
+                        "Alíq. ICMS Interna (%)": round(aliq_interna, 2),
+                        "FCP (%)": round(aliq_fcp, 2),
+                        "Alíq. Interna Efetiva (%)": aliq_int_ef,
+                        "Alíq. ICMS Interestadual (%)": 0.0 if simples else round(aliq_inter_orig, 2),
+                        "Redução BC ICMS (%)": round(red_bc, 2),
+                        "Carga Tributária Final (%)": round(aliq_int_ef, 2),
+                        "DIFAL (%)": difal_pct,
+                        "Metodologia DIFAL": met_difal,
+                        "CST IPI": fed["ipi_cst"],
+                        "cEnq": fed["cenq_ipi"],
+                        "Alíq. IPI (%)": fed["ipi_aliq"],
+                        "CST PIS": fed["pis_cst"],
+                        "Alíq. PIS (%)": fed["pis_aliq"],
+                        "CST COFINS": fed["cofins_cst"],
+                        "Alíq. COFINS (%)": fed["cofins_aliq"],
+                        "Regime Receita": fed["op_receita_sn"],
+                        "CST IBS/CBS": cst_ibs_cbs,
+                        "cClassTrib": fed["cclass"],
+                        "Alíq. IBS (%)": fed["ibs_aliq"],
+                        "Alíq. CBS (%)": fed["cbs_aliq"],
+                        "Deduz ICMS/FCP Custo Médio?": deduz_custo,
+                        "Soma ST/FCP-ST Custo Médio?": soma_st_custo if usa_st else "N",
+                        "Gera Crédito/Débito?": "N" if cst_2 in {"40", "41", "50", "60"} or simples else "S",
+                        "Fonte Oficial (.gov.br)": fonte_url,
+                        "Observação Padrão NF-e": protocolo or f"Operação {sentido} NCM {ncm} conforme RICMS/{uf_d}",
+                    }
+                )
+    return saida

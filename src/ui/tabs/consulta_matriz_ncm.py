@@ -725,6 +725,59 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     st.caption(f"Exibindo {len(linhas_tabela)} de {len(filtradas)} linha(s) ({uf_orig} -> {uf_dest_sel}).")
     st.dataframe(linhas_tabela, use_container_width=True, hide_index=True)
 
+    with st.expander("📊 Visão Técnica Consolidada (Todas as Naturezas Entrada & Saída + MVA Completo)", expanded=False):
+        ncm_ref_cons = str(filtradas[0].get("NCM") if filtradas else (linhas[0].get("NCM") if linhas else "85071090"))
+        uf_dest_cons = "RJ" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
+        if st.button("🔄 Carregar Visão Técnica Unificada (14 Naturezas × Origens × Regimes)", key="cm_btn_cons"):
+            srv_cons = RevTributariaService(db_path)
+            try:
+                st.session_state["cm_cons_linhas"] = srv_cons.consultar_matriz_consolidada_ncm(
+                    ncm=ncm_ref_cons,
+                    uf_origem=uf_orig,
+                    uf_destino=uf_dest_cons,
+                    data_referencia=data_ref.isoformat(),
+                    regime_tributario=regime_emp,
+                    atividade_empresa=atividade_emp,
+                )
+                st.session_state["cm_cons_meta"] = f"{ncm_ref_cons}_{uf_orig}_{uf_dest_cons}"
+            finally:
+                srv_cons.close()
+
+        cons_linhas = st.session_state.get("cm_cons_linhas") or []
+        if cons_linhas:
+            sub_t1, sub_t2, sub_t3 = st.tabs(
+                [
+                    "Todas as Operações",
+                    "Entradas (1.xxx / 2.xxx / 3.xxx)",
+                    "Saídas (5.xxx / 6.xxx)",
+                ]
+            )
+            with sub_t1:
+                st.dataframe(cons_linhas, use_container_width=True, hide_index=True)
+            with sub_t2:
+                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Entrada"], use_container_width=True, hide_index=True)
+            with sub_t3:
+                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Saída"], use_container_width=True, hide_index=True)
+
+            r_st = next((r for r in cons_linhas if r["Tem ST?"] == "Sim"), cons_linhas[0])
+            with st.expander("🧮 Memória de Cálculo Aberta (MVA Ajustado Entrada vs Saída)", expanded=False):
+                st.markdown(
+                    f"**Fórmula Oficial (Convênio ICMS 142/2018):** `MVA Ajustada = [(1 + MVA Original) × (1 - Alíq. Inter) / (1 - Alíq. ST)] - 1`\n\n"
+                    f"- **MVA Original:** `{r_st['MVA Original (%)']}%` | **Alíq. ST:** `{r_st['Alíq. ST (%)']}%` | **FCP-ST:** `{r_st['FCP-ST (%)']}%`\n"
+                    f"- **MVA Ajustada Nacional (12%/7%):** `{r_st['MVA Ajustada Nacional (%)']}%`\n"
+                    f"- **MVA Ajustada Importado (4%):** `{r_st['MVA Ajustada Importado 4% (%)']}%`\n"
+                    f"- **MVA Simples Nacional (sem ajuste):** `{r_st['MVA Simples Nacional (%)']}%`"
+                )
+
+            st.download_button(
+                "📥 Exportar Planilha Técnica Consolidada (.xlsx)",
+                data=exportar_tabela_crua_xlsx(cons_linhas, sheet_name="Matriz_Tecnica_Consolidada"),
+                file_name=f"matriz_tecnica_consolidada_{st.session_state.get('cm_cons_meta', ncm_ref_cons)}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_cons_xlsx",
+                type="primary",
+            )
+
     if filtradas:
         nome_base = nome_export.rsplit(".", 1)[0]
         colunas_export = list(filtradas[0].keys())

@@ -33,7 +33,7 @@ from src.engine.fiscal_math import (
     origem_por_fci,
 )
 from src.engine.lote_entrada_auditor import auditar_lote_xml_entrada
-from src.engine.matrix_generator import gerar_matriz_ncm
+from src.engine.matrix_generator import gerar_matriz_consolidada_ncm, gerar_matriz_ncm
 from src.engine.matriz_operacoes import gerar_linhas_matriz_ncm
 from src.engine.ncm_validator import AchadoValidacaoNCM, validar_matriz_ncms
 from src.engine.reforma_tributaria_engine import (
@@ -82,6 +82,7 @@ __all__ = [
     "derivar_cst_cfop_esperados",
     "executar_pipeline_skills",
     "gerar_linhas_matriz_ncm",
+    "gerar_matriz_consolidada_ncm",
     "gerar_matriz_ncm",
     "origem_por_fci",
     "resolver_parametros_estaduais",

@@ -468,3 +468,68 @@ def test_simulador_fallback_uf_origem_e_espelho_xml(tmp_path):
         and l["Operação com Contribuinte (S/N)"] == "S"
     )
     assert "Anexo III Art. 43" in venda_64_co["Observação Padrão"]
+
+
+def test_matriz_consolidada_entradas_e_saidas_com_mva_e_flags():
+    from src.engine import gerar_matriz_consolidada_ncm
+
+    linhas = gerar_matriz_consolidada_ncm(
+        "85071090",
+        "SP",
+        "RJ",
+        {
+            "cest": "0100100",
+            "tem_st": 1,
+            "aliquota_icms": 18.0,
+            "reducao_base_icms": 0.0,
+            "aliquota_icms_st": 20.0,
+            "margem_st": 40.0,
+            "aliquota_fcp": 2.0,
+            "dispositivo_legal": "Convênio ICMS 142/2018",
+            "fonte_url": "https://www.confaz.fazenda.gov.br/",
+        },
+        regra_federal={
+            "aliquota_ipi": 15.0,
+            "cst_ibs_cbs": "000",
+            "cclass_trib": "000001",
+            "aliquota_cbs": 0.90,
+            "aliquota_ibs_uf": 0.10,
+            "aliquota_ibs_mun": 0.0,
+        },
+    )
+    entradas = [l for l in linhas if l["Sentido"] == "Entrada"]
+    saidas = [l for l in linhas if l["Sentido"] == "Saída"]
+    assert len(entradas) > 0
+    assert len(saidas) > 0
+
+    colunas_obrigatorias = {
+        "Cenário / Nomenclatura Fiscal",
+        "Sentido",
+        "Natureza de Operação",
+        "MVA Original (%)",
+        "MVA Ajustada Nacional (%)",
+        "MVA Ajustada Importado 4% (%)",
+        "MVA Simples Nacional (%)",
+        "Alíq. ST (%)",
+        "FCP-ST (%)",
+        "DIFAL (%)",
+        "Metodologia DIFAL",
+        "Alíq. IPI (%)",
+        "cClassTrib",
+        "Alíq. IBS (%)",
+        "Alíq. CBS (%)",
+        "Deduz ICMS/FCP Custo Médio?",
+        "Soma ST/FCP-ST Custo Médio?",
+        "Gera Crédito/Débito?",
+        "Fonte Oficial (.gov.br)",
+        "Observação Padrão NF-e",
+    }
+    assert colunas_obrigatorias.issubset(set(entradas[0].keys()))
+    assert colunas_obrigatorias.issubset(set(saidas[0].keys()))
+
+    compra_st = next(l for l in entradas if l["Natureza de Operação"] == "(E) Compra para Comercialização" and l["Regime Tributário"] == "Regime Normal")
+    venda_nc = next(l for l in saidas if l["Natureza de Operação"] == "(S) Venda de Mercadorias — Não Contribuinte" and l["Regime Tributário"] == "Regime Normal")
+    assert compra_st["MVA Ajustada Nacional (%)"] > compra_st["MVA Original (%)"]
+    assert compra_st["MVA Ajustada Importado 4% (%)"] > compra_st["MVA Ajustada Nacional (%)"]
+    assert venda_nc["DIFAL (%)"] > 0.0
+    assert "gov.br" in compra_st["Fonte Oficial (.gov.br)"]
