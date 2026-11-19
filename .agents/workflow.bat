@@ -12,7 +12,7 @@ echo.
 :: 1. Verificacao das Skills e Agentes no workspace Antigravity
 echo [1/6] Verificando Skills e Agentes...
 set "MISSING=0"
-for %%S in (sqlite_fiscal_schema fiscal_math_engine nfe_and_erp_auditor linx_microvix_sync official_law_scraper fiscal_qa_validator streamlit_fiscal_ui) do (
+for %%S in (sqlite_fiscal_schema fiscal_math_engine nfe_and_erp_auditor linx_microvix_sync official_law_scraper fiscal_qa_validator streamlit_fiscal_ui direct_import_engine) do (
     if not exist ".agents\skills\%%S\SKILL.md" (
         echo   [ERRO] Skill ausente: .agents\skills\%%S\SKILL.md
         set "MISSING=1"

@@ -1,6 +1,7 @@
 """Subcomponentes modulares das abas da interface Streamlit."""
 
 from src.ui.tabs.consulta_matriz_ncm import render_consulta_matriz_ncm
+from src.ui.tabs.importacao_direta import render_aba_importacao_direta
 from src.ui.tabs.tab_acervo import render_tab_acervo
 from src.ui.tabs.tab_auditor_xml import render_aba_auditor_xml
 from src.ui.tabs.tab_comparativo_erp import render_aba_comparativo_erp
@@ -13,6 +14,7 @@ from src.ui.tabs.tab_vigia import render_aba_vigia
 __all__ = [
     "render_aba_auditor_xml",
     "render_aba_comparativo_erp",
+    "render_aba_importacao_direta",
     "render_aba_matriz",
     "render_aba_matriz_operacoes",
     "render_aba_simulador",

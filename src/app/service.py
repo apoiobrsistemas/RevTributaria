@@ -2607,6 +2607,274 @@ class RevTributariaService:
             data_referencia=data_referencia,
         )
 
+    # ------------------------------------------------------------------
+    # Módulo de Importação Direta (DI / DUIMP / NF-e Entrada CFOP 3.xxx)
+    # ------------------------------------------------------------------
+    def listar_regras_importacao_ncm(self, *, ncm: str = "", uf_destino: str = "") -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        sql = "SELECT * FROM regras_importacao_ncm WHERE 1=1"
+        params: list[Any] = []
+        if ncm.strip():
+            sql += " AND ncm LIKE ?"
+            params.append(f"{ncm.strip()}%")
+        if uf_destino.strip():
+            sql += " AND uf_destino = ?"
+            params.append(uf_destino.strip().upper()[:2])
+        sql += " ORDER BY ncm, uf_desembaraco, uf_destino LIMIT 500"
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    def obter_regra_importacao_ncm(self, ncm: str, *, uf_desembaraco: str = "SP", uf_destino: str = "SP") -> dict[str, Any] | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            """
+            SELECT * FROM regras_importacao_ncm
+            WHERE ncm = ? AND uf_desembaraco = ? AND uf_destino = ?
+            ORDER BY vigencia_inicio DESC, id DESC LIMIT 1
+            """,
+            (ncm.strip(), uf_desembaraco.upper()[:2], uf_destino.upper()[:2]),
+        ).fetchone()
+        if row is not None:
+            return dict(row)
+        row2 = conn.execute(
+            "SELECT * FROM regras_importacao_ncm WHERE ncm = ? ORDER BY vigencia_inicio DESC, id DESC LIMIT 1",
+            (ncm.strip(),),
+        ).fetchone()
+        return dict(row2) if row2 is not None else None
+
+    def salvar_regra_importacao_ncm(
+        self,
+        *,
+        ncm: str,
+        cest: str = "",
+        uf_desembaraco: str = "SP",
+        uf_destino: str = "SP",
+        vigencia_inicio: str = "2026-01-01",
+        aliquota_ii: float = 0.0,
+        sem_similar_nacional_camex: int = 0,
+        aliquota_ipi: float = 0.0,
+        aliquota_pis_imp: float = 2.10,
+        aliquota_cofins_imp: float = 9.65,
+        adicional_cofins_imp: float = 1.00,
+        aliquota_icms_interna: float = 18.0,
+        aliquota_fcp: float = 0.0,
+        reducao_bc_icms: float = 0.0,
+        tem_st: int = 0,
+        mva_original_st: float = 0.0,
+        regime_especial_estadual: str = "",
+        cfop_entrada_padrao: str = "3.102",
+        ato_legal: str = "",
+        fonte_url: str = "https://www.gov.br/mdic/pt-br/assuntos/comercio-exterior/camex",
+        status: str = "A_CONFERIR",
+        usuario: str = "auditor_fiscal",
+    ) -> int:
+        from src.legislation import validar_url_oficial
+
+        url_validada = validar_url_oficial(fonte_url)
+        conn = self._get_conn()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO regras_importacao_ncm (
+                    ncm, cest, uf_desembaraco, uf_destino, vigencia_inicio,
+                    aliquota_ii, sem_similar_nacional_camex, aliquota_ipi,
+                    aliquota_pis_imp, aliquota_cofins_imp, adicional_cofins_imp,
+                    aliquota_icms_interna, aliquota_fcp, reducao_bc_icms,
+                    tem_st, mva_original_st, regime_especial_estadual,
+                    cfop_entrada_padrao, ato_legal, fonte_url, versao, status, atualizado_em
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+                ON CONFLICT(ncm, cest, uf_desembaraco, uf_destino, vigencia_inicio) DO UPDATE SET
+                    aliquota_ii = excluded.aliquota_ii,
+                    sem_similar_nacional_camex = excluded.sem_similar_nacional_camex,
+                    aliquota_ipi = excluded.aliquota_ipi,
+                    aliquota_pis_imp = excluded.aliquota_pis_imp,
+                    aliquota_cofins_imp = excluded.aliquota_cofins_imp,
+                    adicional_cofins_imp = excluded.adicional_cofins_imp,
+                    aliquota_icms_interna = excluded.aliquota_icms_interna,
+                    aliquota_fcp = excluded.aliquota_fcp,
+                    reducao_bc_icms = excluded.reducao_bc_icms,
+                    tem_st = excluded.tem_st,
+                    mva_original_st = excluded.mva_original_st,
+                    regime_especial_estadual = excluded.regime_especial_estadual,
+                    cfop_entrada_padrao = excluded.cfop_entrada_padrao,
+                    ato_legal = excluded.ato_legal,
+                    fonte_url = excluded.fonte_url,
+                    versao = regras_importacao_ncm.versao + 1,
+                    status = excluded.status,
+                    atualizado_em = datetime('now')
+                """,
+                (
+                    ncm.strip(),
+                    cest.strip(),
+                    uf_desembaraco.upper()[:2],
+                    uf_destino.upper()[:2],
+                    vigencia_inicio,
+                    float(aliquota_ii),
+                    int(sem_similar_nacional_camex),
+                    float(aliquota_ipi),
+                    float(aliquota_pis_imp),
+                    float(aliquota_cofins_imp),
+                    float(adicional_cofins_imp),
+                    float(aliquota_icms_interna),
+                    float(aliquota_fcp),
+                    float(reducao_bc_icms),
+                    int(tem_st),
+                    float(mva_original_st),
+                    regime_especial_estadual,
+                    cfop_entrada_padrao,
+                    ato_legal,
+                    url_validada,
+                    status,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id FROM regras_importacao_ncm WHERE ncm = ? AND cest = ? AND uf_desembaraco = ? AND uf_destino = ? AND vigencia_inicio = ?",
+                (ncm.strip(), cest.strip(), uf_desembaraco.upper()[:2], uf_destino.upper()[:2], vigencia_inicio),
+            ).fetchone()
+            regra_id = int(row["id"])
+            conn.execute(
+                """
+                INSERT INTO historico_alteracoes (tabela_origem, registro_id, acao, campo, valor_novo, motivo, usuario)
+                VALUES ('regras_importacao_ncm', ?, 'CRIACAO', 'regra_importacao', ?, 'Atualização regra TEC/CAMEX Importação Direta', ?)
+                """,
+                (regra_id, json.dumps({"ncm": ncm, "ii": aliquota_ii, "camex": sem_similar_nacional_camex, "status": status}), usuario),
+            )
+        return regra_id
+
+    def aprovar_regra_importacao_ncm(self, regra_id: int, *, usuario: str = "auditor_fiscal") -> None:
+        conn = self._get_conn()
+        with conn:
+            conn.execute(
+                "UPDATE regras_importacao_ncm SET status = 'ACEITO', versao = versao + 1, atualizado_em = datetime('now') WHERE id = ?",
+                (int(regra_id),),
+            )
+            conn.execute(
+                """
+                INSERT INTO historico_alteracoes (tabela_origem, registro_id, acao, campo, valor_novo, motivo, usuario)
+                VALUES ('regras_importacao_ncm', ?, 'ACEITE', 'status', 'ACEITO', 'Curadoria TEC/CAMEX aprovada', ?)
+                """,
+                (int(regra_id), usuario),
+            )
+
+    def sincronizar_tec_camex_padrao(self) -> dict[str, int]:
+        """Sincroniza catálogo base TEC/CAMEX/TIPI oficial em regras_importacao_ncm via UPSERT."""
+        self.garantir_catalogo_fontes_oficiais()
+        sementes = [
+            ("85171300", "", "SP", "SP", 16.0, 0, 15.0, 2.10, 9.65, 1.00, 18.0, 0.0, 0, 0.0, "", "3.102", "TEC/GECEX + TIPI Dec. 11.158/2022"),
+            ("85071090", "0100100", "SP", "SP", 18.0, 0, 15.0, 2.10, 9.65, 1.00, 18.0, 0.0, 1, 40.0, "", "3.102", "TEC/GECEX + Convênio ICMS 142/2018"),
+            ("84715010", "", "SP", "SP", 0.0, 1, 0.0, 2.10, 9.65, 0.00, 18.0, 0.0, 0, 0.0, "Ex-Tarifário / Sem Similar CAMEX", "3.102", "Resolução CAMEX 79/2012 (Origem 6)"),
+            ("90189099", "", "SC", "SC", 0.0, 1, 0.0, 2.10, 9.65, 0.00, 17.0, 0.0, 0, 0.0, "TTD 409/410 SC (Diferimento)", "3.102", "Resolução CAMEX 79/2012 + RICMS/SC"),
+        ]
+        total = 0
+        for s in sementes:
+            self.salvar_regra_importacao_ncm(
+                ncm=s[0], cest=s[1], uf_desembaraco=s[2], uf_destino=s[3],
+                aliquota_ii=s[4], sem_similar_nacional_camex=s[5], aliquota_ipi=s[6],
+                aliquota_pis_imp=s[7], aliquota_cofins_imp=s[8], adicional_cofins_imp=s[9],
+                aliquota_icms_interna=s[10], aliquota_fcp=s[11], tem_st=s[12], mva_original_st=s[13],
+                regime_especial_estadual=s[14], cfop_entrada_padrao=s[15], ato_legal=s[16],
+                status="ACEITO",
+            )
+            total += 1
+        return {"regras_sincronizadas": total}
+
+    def registrar_e_auditar_documento_importacao(
+        self,
+        nome_arquivo: str,
+        conteudo: bytes,
+        *,
+        uf_destino: str | None = None,
+    ) -> dict[str, Any]:
+        from src.integrations.import_docs_parser import auditar_documento_importacao, parsear_documento_importacao_auto
+
+        doc = parsear_documento_importacao_auto(nome_arquivo, conteudo)
+        regras_map = {r["ncm"]: r for r in self.listar_regras_importacao_ncm()}
+        aud = auditar_documento_importacao(doc, regras_por_ncm=regras_map, uf_destino=uf_destino)
+
+        conn = self._get_conn()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO importacao_documentos (
+                    numero_documento, tipo_documento, data_registro, uf_desembaraco, uf_destino,
+                    taxa_cambio, valor_aduaneiro_total, siscomex_total, afrmm_total, outras_despesas_total,
+                    status_conciliacao, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(numero_documento) DO UPDATE SET
+                    tipo_documento = excluded.tipo_documento,
+                    data_registro = excluded.data_registro,
+                    uf_desembaraco = excluded.uf_desembaraco,
+                    uf_destino = excluded.uf_destino,
+                    valor_aduaneiro_total = excluded.valor_aduaneiro_total,
+                    status_conciliacao = excluded.status_conciliacao,
+                    payload_json = excluded.payload_json
+                """,
+                (
+                    str(doc["numero_documento"]),
+                    str(doc["tipo_documento"]),
+                    str(doc["data_registro"]),
+                    str(doc["uf_desembaraco"]),
+                    str(uf_destino or doc["uf_destino"]),
+                    float(doc.get("taxa_cambio", 1.0)),
+                    float(doc.get("valor_aduaneiro_total", 0.0)),
+                    float(doc.get("siscomex_total", 0.0)),
+                    float(doc.get("afrmm_total", 0.0)),
+                    float(doc.get("outras_despesas_total", 0.0)),
+                    str(aud["status_conciliacao"]),
+                    json.dumps(doc, ensure_ascii=False),
+                ),
+            )
+            doc_id = int(
+                conn.execute(
+                    "SELECT id FROM importacao_documentos WHERE numero_documento = ?",
+                    (str(doc["numero_documento"]),),
+                ).fetchone()["id"]
+            )
+            for idx, it in enumerate(doc.get("itens") or [], start=1):
+                it_aud = aud["itens_auditados"][idx - 1] if idx - 1 < len(aud["itens_auditados"]) else {}
+                conn.execute(
+                    """
+                    INSERT INTO importacao_itens (
+                        documento_id, numero_adicao, numero_item, ncm, cest, descricao,
+                        valor_aduaneiro, ii_declarado, ipi_declarado, pis_imp_declarado, cofins_imp_declarado,
+                        bc_icms_declarada, icms_declarado, origem_declarada, cfop_declarado, cst_declarado,
+                        status_conciliacao, divergencias_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(documento_id, numero_item) DO UPDATE SET
+                        status_conciliacao = excluded.status_conciliacao,
+                        divergencias_json = excluded.divergencias_json
+                    """,
+                    (
+                        doc_id,
+                        str(it.get("numero_adicao") or f"{idx:03d}"),
+                        int(it.get("numero_item") or idx),
+                        str(it.get("ncm") or ""),
+                        str(it.get("cest") or ""),
+                        str(it.get("descricao") or ""),
+                        float(it.get("valor_aduaneiro") or 0.0),
+                        float(it.get("ii_declarado") or 0.0),
+                        float(it.get("ipi_declarado") or 0.0),
+                        float(it.get("pis_imp_declarado") or 0.0),
+                        float(it.get("cofins_imp_declarado") or 0.0),
+                        float(it.get("bc_icms_declarada") or 0.0),
+                        float(it.get("icms_declarado") or 0.0),
+                        str(it.get("origem_declarada") or "1"),
+                        str(it.get("cfop_declarado") or "3.102"),
+                        str(it.get("cst_declarado") or "00"),
+                        str(it_aud.get("Status") or "OK"),
+                        json.dumps([it_aud.get("Divergências", "")], ensure_ascii=False),
+                    ),
+                )
+        return aud
+
+    def listar_documentos_importacao(self) -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, numero_documento, tipo_documento, data_registro, uf_desembaraco, uf_destino, valor_aduaneiro_total, status_conciliacao, criado_em FROM importacao_documentos ORDER BY id DESC LIMIT 100"
+            ).fetchall()
+        ]
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""

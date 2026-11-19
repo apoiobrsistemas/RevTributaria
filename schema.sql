@@ -602,3 +602,79 @@ CREATE TABLE IF NOT EXISTS matriz_protocolos_st (
 
 CREATE INDEX IF NOT EXISTS idx_protocolos_st_busca
     ON matriz_protocolos_st (uf_origem, uf_destino, ncm_prefixo, cest, vigencia_inicio, vigencia_fim);
+
+
+-- ----------------------------------------------------------------------------
+-- 10. MÓDULO DE IMPORTAÇÃO DIRETA DO EXTERIOR (DI / DUIMP / NF-E ENTRADA 3.xxx)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS regras_importacao_ncm (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ncm                         TEXT NOT NULL,
+    cest                        TEXT NOT NULL DEFAULT '',
+    uf_desembaraco              TEXT NOT NULL,
+    uf_destino                  TEXT NOT NULL,
+    vigencia_inicio             TEXT NOT NULL,
+    vigencia_fim                TEXT,
+    aliquota_ii                 REAL NOT NULL DEFAULT 0.0,
+    sem_similar_nacional_camex  INTEGER NOT NULL DEFAULT 0 CHECK (sem_similar_nacional_camex IN (0, 1)),
+    aliquota_ipi                REAL NOT NULL DEFAULT 0.0,
+    aliquota_pis_imp            REAL NOT NULL DEFAULT 2.10,
+    aliquota_cofins_imp         REAL NOT NULL DEFAULT 9.65,
+    adicional_cofins_imp        REAL NOT NULL DEFAULT 1.00,
+    aliquota_icms_interna       REAL NOT NULL DEFAULT 18.0,
+    aliquota_fcp                REAL NOT NULL DEFAULT 0.0,
+    reducao_bc_icms             REAL NOT NULL DEFAULT 0.0,
+    tem_st                      INTEGER NOT NULL DEFAULT 0 CHECK (tem_st IN (0, 1)),
+    mva_original_st             REAL NOT NULL DEFAULT 0.0,
+    regime_especial_estadual    TEXT NOT NULL DEFAULT '',
+    cfop_entrada_padrao         TEXT NOT NULL DEFAULT '3.102' CHECK (cfop_entrada_padrao IN ('3.102', '3.101', '3.551', '3.556', '3.949')),
+    ato_legal                   TEXT NOT NULL DEFAULT '',
+    fonte_url                   TEXT NOT NULL DEFAULT 'https://www.gov.br/mdic/pt-br/assuntos/comercio-exterior/camex',
+    versao                      INTEGER NOT NULL DEFAULT 1,
+    status                      TEXT NOT NULL DEFAULT 'A_CONFERIR' CHECK (status IN ('A_CONFERIR', 'ACEITO')),
+    atualizado_em               TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (ncm, cest, uf_desembaraco, uf_destino, vigencia_inicio)
+);
+
+CREATE INDEX IF NOT EXISTS idx_regras_importacao_busca
+    ON regras_importacao_ncm (ncm, cest, uf_desembaraco, uf_destino, vigencia_inicio, vigencia_fim);
+
+CREATE TABLE IF NOT EXISTS importacao_documentos (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero_documento        TEXT NOT NULL UNIQUE,
+    tipo_documento          TEXT NOT NULL CHECK (tipo_documento IN ('DUIMP', 'DI_XML', 'DI_PDF', 'NFE_ENTRADA_3XXX')),
+    data_registro           TEXT NOT NULL,
+    uf_desembaraco          TEXT NOT NULL,
+    uf_destino              TEXT NOT NULL,
+    taxa_cambio             REAL NOT NULL DEFAULT 1.0,
+    valor_aduaneiro_total   REAL NOT NULL DEFAULT 0.0,
+    siscomex_total          REAL NOT NULL DEFAULT 0.0,
+    afrmm_total             REAL NOT NULL DEFAULT 0.0,
+    outras_despesas_total   REAL NOT NULL DEFAULT 0.0,
+    status_conciliacao      TEXT NOT NULL DEFAULT 'OK' CHECK (status_conciliacao IN ('OK', 'DIVERGENTE', 'ATENCAO', 'SEM_REGRA')),
+    payload_json            TEXT NOT NULL DEFAULT '{}',
+    criado_em               TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS importacao_itens (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    documento_id            INTEGER NOT NULL REFERENCES importacao_documentos(id) ON DELETE CASCADE,
+    numero_adicao           TEXT NOT NULL DEFAULT '001',
+    numero_item             INTEGER NOT NULL,
+    ncm                     TEXT NOT NULL,
+    cest                    TEXT NOT NULL DEFAULT '',
+    descricao               TEXT NOT NULL DEFAULT '',
+    valor_aduaneiro         REAL NOT NULL DEFAULT 0.0,
+    ii_declarado            REAL NOT NULL DEFAULT 0.0,
+    ipi_declarado           REAL NOT NULL DEFAULT 0.0,
+    pis_imp_declarado       REAL NOT NULL DEFAULT 0.0,
+    cofins_imp_declarado    REAL NOT NULL DEFAULT 0.0,
+    bc_icms_declarada       REAL NOT NULL DEFAULT 0.0,
+    icms_declarado          REAL NOT NULL DEFAULT 0.0,
+    origem_declarada        TEXT NOT NULL DEFAULT '1',
+    cfop_declarado          TEXT NOT NULL DEFAULT '3.102',
+    cst_declarado           TEXT NOT NULL DEFAULT '00',
+    status_conciliacao      TEXT NOT NULL DEFAULT 'OK' CHECK (status_conciliacao IN ('OK', 'DIVERGENTE', 'ATENCAO', 'SEM_REGRA')),
+    divergencias_json       TEXT NOT NULL DEFAULT '[]',
+    UNIQUE (documento_id, numero_item)
+);

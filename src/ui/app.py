@@ -23,6 +23,7 @@ from src.ui.design_system import (
 from src.ui.tabs import (
     render_aba_auditor_xml,
     render_aba_comparativo_erp,
+    render_aba_importacao_direta,
     render_aba_matriz,
     render_aba_simulador,
     render_aba_validador,
@@ -304,6 +305,7 @@ def main() -> None:
 
     menu_opcoes = [
         "🔎 Consulta Matriz por NCM (CFOPs & Impostos)",
+        "🚢 Importação Direta (DI / DUIMP / Entrada 3.xxx)",
         "📋 Matriz Legal (NCMs)",
         "🧮 Simulador (11 Blocos)",
         "📄 Auditor XML NF-e",
@@ -324,31 +326,33 @@ def main() -> None:
     if menu_ativo == menu_opcoes[0]:
         render_consulta_matriz_ncm(db_path=db_path)
     elif menu_ativo == menu_opcoes[1]:
+        render_aba_importacao_direta(db_path=db_path, usuario=usuario)
+    elif menu_ativo == menu_opcoes[2]:
         render_aba_matriz(
             db_path=db_path,
             usuario=usuario,
             carregar_regras=_carregar_regras,
             limpar_cache=_limpar_cache,
         )
-    elif menu_ativo == menu_opcoes[2]:
-        render_aba_simulador(db_path=db_path)
     elif menu_ativo == menu_opcoes[3]:
+        render_aba_simulador(db_path=db_path)
+    elif menu_ativo == menu_opcoes[4]:
         render_aba_auditor_xml(
             db_path=db_path,
             carregar_nfes=_carregar_nfes,
             limpar_cache=_limpar_cache,
         )
-    elif menu_ativo == menu_opcoes[4]:
-        render_aba_comparativo_erp(db_path=db_path, limpar_cache=_limpar_cache)
     elif menu_ativo == menu_opcoes[5]:
+        render_aba_comparativo_erp(db_path=db_path, limpar_cache=_limpar_cache)
+    elif menu_ativo == menu_opcoes[6]:
         render_aba_vigia(
             db_path=db_path,
             carregar_fontes=_carregar_fontes,
             limpar_cache=_limpar_cache,
         )
-    elif menu_ativo == menu_opcoes[6]:
-        render_aba_validador(db_path=db_path, limpar_cache=_limpar_cache)
     elif menu_ativo == menu_opcoes[7]:
+        render_aba_validador(db_path=db_path, limpar_cache=_limpar_cache)
+    elif menu_ativo == menu_opcoes[8]:
         srv_ac = RevTributariaService(db_path)
         try:
             render_tab_acervo(srv_ac)
