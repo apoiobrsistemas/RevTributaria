@@ -40,7 +40,7 @@ def test_exportador_linx_terceiro_71_colunas_e_formatacao(tmp_path: Path) -> Non
         )
         reg0 = convertidas[0]
         assert list(reg0.keys()) == list(COLUNAS_LAYOUT_LINX_TERCEIRO)
-        assert reg0["ID Config"] == 1
+        assert reg0["ID Config"] == str(vendas[0]["NCM"])
         assert reg0["Natureza de Operação"] == 43
         assert "." not in str(reg0["CFOP"])
         assert "." in str(reg0["CST ICMS"])
@@ -61,7 +61,7 @@ def test_exportador_linx_terceiro_71_colunas_e_formatacao(tmp_path: Path) -> Non
         reader = csv.DictReader(io.StringIO(csv_bytes.decode("utf-8-sig")), delimiter=",")
         rows_csv = list(reader)
         assert reader.fieldnames == list(COLUNAS_LAYOUT_LINX_TERCEIRO)
-        assert rows_csv[0]["ID Config"] == "10"
+        assert rows_csv[0]["ID Config"] == str(vendas[0]["NCM"])
         assert rows_csv[0]["Natureza de Operação"] == "43"
     finally:
         srv.close()

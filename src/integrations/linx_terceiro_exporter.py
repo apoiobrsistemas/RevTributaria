@@ -132,6 +132,7 @@ def converter_linhas_para_layout_linx_terceiro(
     *,
     id_config_inicial: int = 1,
     ids_natureza: dict[str, int] | None = None,
+    usar_ncm_no_id_config: bool = True,
 ) -> list[dict[str, Any]]:
     """Converte linhas da Consulta Matriz por NCM para o layout exato de 71 colunas da Linx."""
     saida: list[dict[str, Any]] = []
@@ -161,8 +162,11 @@ def converter_linhas_para_layout_linx_terceiro(
         escriturar = re.sub(r"\D", "", str(linha.get("Escriturar Valores sem Tributação como") or "3")) or "3"
         op_receita = _sn(linha.get("Operação de Receita (S/N)"), "S" if "Venda" in nat_nome else "N")
 
+        ncm_tela = str(linha.get("NCM") or "").strip()
+        id_cfg_val: str | int = ncm_tela if (usar_ncm_no_id_config and ncm_tela) else (int(id_config_inicial) + idx)
+
         registro: dict[str, Any] = {
-            "ID Config": int(id_config_inicial) + idx,
+            "ID Config": id_cfg_val,
             "Natureza de Operação": int(id_nat_val),
             "UF da Operação": uf_op,
             "Operação com Contribuinte (S/N)": contrib,
@@ -262,12 +266,14 @@ def exportar_layout_linx_terceiro_xlsx(
     *,
     id_config_inicial: int = 1,
     ids_natureza: dict[str, int] | None = None,
+    usar_ncm_no_id_config: bool = True,
 ) -> bytes:
     """Exporta planilha .xlsx exatamente no modelo oficial de importação Linx (71 colunas)."""
     convertidas = converter_linhas_para_layout_linx_terceiro(
         linhas,
         id_config_inicial=id_config_inicial,
         ids_natureza=ids_natureza,
+        usar_ncm_no_id_config=usar_ncm_no_id_config,
     )
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -275,6 +281,7 @@ def exportar_layout_linx_terceiro_xlsx(
     ws.append(list(COLUNAS_LAYOUT_LINX_TERCEIRO))
     for reg in convertidas:
         ws.append([sanitizar_celula_planilha(reg.get(col, "")) for col in COLUNAS_LAYOUT_LINX_TERCEIRO])
+        ws.cell(row=ws.max_row, column=1).number_format = "@"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -285,12 +292,14 @@ def exportar_layout_linx_terceiro_csv(
     *,
     id_config_inicial: int = 1,
     ids_natureza: dict[str, int] | None = None,
+    usar_ncm_no_id_config: bool = True,
 ) -> bytes:
     """Exporta .csv (delimitado por vírgula) no modelo exato de importação Linx (71 colunas)."""
     convertidas = converter_linhas_para_layout_linx_terceiro(
         linhas,
         id_config_inicial=id_config_inicial,
         ids_natureza=ids_natureza,
+        usar_ncm_no_id_config=usar_ncm_no_id_config,
     )
     buf = io.StringIO()
     writer = csv.DictWriter(
