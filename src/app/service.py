@@ -3138,6 +3138,33 @@ class RevTributariaService:
             data_operacao=data_operacao,
         )
 
+    def diagnosticar_st_saida_4_passos(
+        self,
+        *,
+        ncm: str,
+        cest: str = "",
+        uf_origem: str = "SP",
+        uf_destino: str = "SP",
+        perfil_destinatario: str = "CO",
+        finalidade_operacao: str = "REVENDA",
+        origem_mercadoria: str = "0",
+        data_operacao: str | None = None,
+    ) -> dict[str, Any]:
+        """Executa o diagnóstico de ST na Saída em 4 camadas (Conv. 142/18 x Origem x Destino/Perfil x Acordo)."""
+        from src.engine.st_resolver import resolver_st_saida
+
+        return resolver_st_saida(
+            self._get_conn(),
+            ncm=ncm,
+            cest=cest,
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            perfil_destinatario=perfil_destinatario,
+            finalidade_operacao=finalidade_operacao,
+            origem_mercadoria=origem_mercadoria,
+            data_operacao=data_operacao,
+        )
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""

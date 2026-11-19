@@ -47,7 +47,7 @@ from src.engine.reforma_tributaria_engine import (
     calcular_transicao_lc214,
 )
 from src.engine.skills_pipeline import executar_pipeline_skills
-from src.engine.st_resolver import resolver_st_3_passos
+from src.engine.st_resolver import resolver_st_3_passos, resolver_st_entrada, resolver_st_saida
 from src.engine.sp_decision_tree import (
     CASOS_CRITICOS_SP,
     REVOGACOES_ST_SP,

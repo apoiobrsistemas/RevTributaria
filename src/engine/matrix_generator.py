@@ -1229,9 +1229,19 @@ def gerar_matriz_consolidada_ncm(
                             if eh_ent:
                                 cst_2 = "70" if sp_o["red_bc"] > 0 else "60"
                                 csosn_3 = "500"
-                            else:
+                            elif not interestadual:
                                 cst_2 = "70" if sp_o["red_bc"] > 0 else ("60" if cfop_int == "5.405" else "10")
                                 csosn_3 = "500" if cst_2 == "60" else "201"
+                            elif perfil_lbl == "Contribuinte" and not tem_acordo_st:
+                                cst_2 = "60"
+                                csosn_3 = "500"
+                            elif perfil_lbl == "Contribuinte":
+                                cfop_inter = "6.404" if "Venda" in nat_nome else cfop_inter
+                                cst_2 = "70" if sp_o["red_bc"] > 0 else "10"
+                                csosn_3 = "201"
+                            else:
+                                cst_2 = "60"
+                                csosn_3 = "500"
                         elif sp_o["isento"]:
                             cst_2 = cst_regra if cst_regra in {"40", "41", "50"} else "40"
                             csosn_3 = "400"
@@ -1245,10 +1255,22 @@ def gerar_matriz_consolidada_ncm(
                         aliq_int_ef = round(sp_o["aliq_int"] * (1.0 - sp_o["red_bc"] / 100.0) + (0.0 if sp_o["isento"] else aliq_fcp), 2)
                         met_difal = "Base Dupla" if bc_dupla == "S" else ("Soma IPI na Base" if somar_ipi_difal == "S" else "Base Única")
                         tag_unica = " (Regra Única)" if len(regimes_ativos_ncm) == 1 and mesma_origem else ""
-                        cenario = (
-                            f"[{chave_exc.upper()}] NCM {ncm} + {sp_o['orig_lbl']} — {sp_o['enq']}{tag_unica}"
-                            + (f" — MVA Ajust. {sp_o['mva_aj']:.2f}%" if sp_o["mva_aj"] > 0 else "")
-                        )
+                        if not eh_ent and usa_st and not interestadual:
+                            cenario = f"[SAÍDA INTERNA CO/NC] NCM {ncm} + ST Substituído ({sp_o['orig_dig']}.{cst_2} — Sem Destaque)"
+                        elif not eh_ent and usa_st and interestadual and perfil_lbl == "Contribuinte" and tem_acordo_st:
+                            cenario = (
+                                f"[SAÍDA INTER. CO] NCM {ncm} + ST {sp_o['orig_lbl']} Destacada "
+                                f"({sp_o['orig_dig']}.{cst_2} — Convênio/Protocolo + MVA Ajust. {sp_o['mva_aj']:.2f}%)"
+                            )
+                        elif not eh_ent and usa_st and interestadual and perfil_lbl == "Contribuinte" and not tem_acordo_st:
+                            cenario = f"[SAÍDA INTER. CO] NCM {ncm} + ST Sem Convênio/Protocolo ({sp_o['orig_dig']}.60 — Sem Destaque ST)"
+                        elif not eh_ent and interestadual and "Não Contribuinte" in perfil_lbl and perfil_lbl == "Não Contribuinte":
+                            cenario = f"[SAÍDA INTER. NC] NCM {ncm} + Consumidor Final (CFOP 6.108 + DIFAL EC 87/2015)"
+                        else:
+                            cenario = (
+                                f"[{chave_exc.upper()}] NCM {ncm} + {sp_o['orig_lbl']} — {sp_o['enq']}{tag_unica}"
+                                + (f" — MVA Ajust. {sp_o['mva_aj']:.2f}%" if sp_o["mva_aj"] > 0 else "")
+                            )
 
                         saida.append(
                             {
