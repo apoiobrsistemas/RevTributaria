@@ -1255,6 +1255,46 @@ class RevTributariaService:
         )
 
         linhas: list[dict[str, Any]] = []
+        if not cest:
+            from src.engine.st_resolver import resolver_st_3_passos
+            diag_multi = resolver_st_3_passos(
+                conn, ncm=ncm_limpo, uf_origem=uf_origem, uf_destino=uf_destino, data_operacao=ref
+            )
+            segs = diag_multi.get("segmentos_avaliados") or []
+            if len(segs) > 1:
+                reg_base = dict(regras_list[0])
+                for seg in segs:
+                    seg_tem_st = bool(seg.get("tem_st"))
+                    cest_fmt = str(seg.get("cest_formatado") or seg.get("cest") or "")
+                    seg_cod = str(seg.get("segmento_codigo") or "")
+                    reg_seg = dict(seg.get("regra_estadual") or reg_base)
+                    reg_seg["cest"] = str(seg.get("cest") or "")
+                    if not seg_tem_st:
+                        reg_seg["margem_st"] = 0.0
+                        reg_seg["aliquota_icms_st"] = 0.0
+                        reg_seg["cst_icms"] = "00"
+                        reg_seg["tem_st"] = 0
+                        reg_seg["dispositivo_legal"] = str(seg.get("artigo_legal") or "Excluído da ST / Tributado Integralmente")
+                    status_lbl = "ST Vigente" if seg_tem_st else "Excluído ST / Normal"
+                    tag = f"[CEST {cest_fmt} · Seg. {seg_cod} · {status_lbl}]"
+                    geradas = gerar_matriz_ncm(
+                        ncm=ncm_limpo,
+                        uf_origem=uf_origem,
+                        uf_destino=uf_destino,
+                        regra_estadual=reg_seg,
+                        regra_federal=regra_fed,
+                        tabela_terceiros=regra_terc,
+                        regime_tributario=regime_tributario,
+                        atividade_empresa=atividade_empresa,
+                    )
+                    for g in geradas:
+                        g_copy = dict(g)
+                        for nat_k in ("Natureza de Operação", "Natureza da Operação"):
+                            if nat_k in g_copy:
+                                g_copy[nat_k] = f"{g_copy[nat_k]} {tag}"
+                        linhas.append(g_copy)
+                return linhas
+
         for regra_est in regras_list:
             linhas.extend(
                 gerar_matriz_ncm(
@@ -3175,10 +3215,14 @@ class RevTributariaService:
     ) -> dict[str, Any]:
         from src.database.repository import normalizar_ncm
         from src.engine.matrix_generator import avaliar_arvore_booleana_ncm
+        from src.engine.st_resolver import resolver_st_3_passos
 
         conn = self._get_conn()
         ncm_l = normalizar_ncm(ncm)
         ref = data_referencia or date.today().isoformat()
+        diag_3p = resolver_st_3_passos(
+            conn, ncm=ncm_l, uf_origem=uf_origem, uf_destino=uf_destino, data_operacao=ref
+        )
         reg_est = buscar_regra_estadual_icms(
             conn, uf_origem=uf_origem, uf_destino=uf_destino, ncm=ncm_l, data_referencia=ref
         ) or buscar_regra_estadual_icms(
@@ -3191,6 +3235,7 @@ class RevTributariaService:
             uf_destino=uf_destino,
             regra_estadual=dict(reg_est),
             regra_federal=dict(reg_fed) if reg_fed else None,
+            segmentos_multi_cest=diag_3p.get("segmentos_avaliados"),
         )
 
     def executar_arvore_booleana_lote_planilha(

@@ -690,6 +690,7 @@ CREATE TABLE IF NOT EXISTS convenio_142_anexos (
     cest                    TEXT NOT NULL,
     ncm_limpo               TEXT NOT NULL,
     ncm_raw                 TEXT NOT NULL DEFAULT '',
+    tamanho_prefixo         INTEGER NOT NULL DEFAULT 0,
     descricao_item          TEXT NOT NULL DEFAULT '',
     bens_relacionados       TEXT NOT NULL DEFAULT '',
     elegivel_st_nacional    INTEGER NOT NULL DEFAULT 1 CHECK (elegivel_st_nacional IN (0, 1)),

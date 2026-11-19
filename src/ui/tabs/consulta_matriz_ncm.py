@@ -249,6 +249,15 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             p1.info(f"**Passo 1 (Convênio 142/2018):**\n\n{diag_3p['passo_1_resumo']}")
             p2.info(f"**Passo 2 (Legislação {uf_dest_res}):**\n\n{diag_3p['passo_2_resumo']}")
             p3.info(f"**Passo 3 (Acordo {uf_orig} → {uf_dest_res}):**\n\n{diag_3p['passo_3_resumo']}")
+            segs_av = diag_3p.get("segmentos_avaliados") or []
+            if segs_av:
+                st.markdown("**Detalhamento Multi-CEST / Multi-Segmento avaliado no Passo 2:**")
+                for seg_it in segs_av:
+                    st_badge = "ST Vigente" if seg_it.get("tem_st") else "Fora da ST / Tributado Integralmente"
+                    st.caption(
+                        f"- `CEST {seg_it.get('cest_formatado')}` (Seg. `{seg_it.get('segmento_codigo')}` · {seg_it.get('anexo')}) "
+                        f"→ **{st_badge}** | IVA-ST: `{seg_it.get('mva_original', 0):.2f}%` | Base: {seg_it.get('artigo_legal')}"
+                    )
             st.markdown(f"**Saída Contribuinte (`CO` — {diag_sai_co['cfop']} | {diag_sai_co['cst']}):**")
             s1, s2, s3, s4 = st.columns(4)
             s1.info(f"**Passo 1 (Conv. 142/18):**\n\n{diag_sai_co['passo_1_resumo']}")

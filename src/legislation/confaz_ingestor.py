@@ -23,6 +23,8 @@ _SEED_CONVENIO_142: tuple[tuple[str, str, str, str, str], ...] = (
     ("Anexo XI", "10", "1000600", "39172300", "Tubos rígidos de polímeros de cloreto de vinila (PVC)"),
     ("Anexo XI", "10", "1000700", "39181000", "Revestimentos de pavimentos de polímeros de cloreto de vinila"),
     ("Anexo XI", "10", "1004700", "73083000", "Portas, janelas e seus caixilhos de ferro ou aço"),
+    ("Anexo XII", "12", "1200400", "853650", "Interruptores, seccionadores e comutadores (Materiais Elétricos - Seg. 12)"),
+    ("Anexo II", "01", "0105500", "853650", "Interruptores e comutadores de uso automotivo (Autopeças - Seg. 01)"),
     ("Anexo XIV", "13", "1300100", "3004", "Medicamentos de uso humano"),
     ("Anexo XVII", "16", "1600100", "4011", "Pneumáticos novos de borracha (Seg. 16)"),
     ("Anexo XVII", "16", "1600100", "401110", "Pneumáticos novos para automóveis de passageiros"),
@@ -49,6 +51,19 @@ _SEED_ACORDOS_ST: tuple[tuple[str, str, str, str, str, str, str], ...] = (
 )
 
 
+def explodir_codigos_ncm(texto_ncm: str) -> list[str]:
+    """Explode células com múltiplos NCMs (vírgula, ponto-e-vírgula, barra, quebra de linha) em dígitos limpos."""
+    partes = re.split(r"[,;/\n\r]+", str(texto_ncm or ""))
+    codigos: list[str] = []
+    for parte in partes:
+        encontrados = re.findall(r"\b(\d{4}(?:\.\d{2}(?:\.\d{2})?)?|\d{6}|\d{8}|\d{2})\b", parte.strip())
+        for raw in encontrados:
+            limpo = re.sub(r"\D", "", raw)
+            if len(limpo) in {2, 4, 6, 8} and limpo not in codigos:
+                codigos.append(limpo)
+    return codigos
+
+
 def parsear_convenio_142_texto(texto_ou_html: str) -> list[dict[str, Any]]:
     """Parseia Anexos II a XXVIII do Convênio ICMS 142/2018 explodindo múltiplos NCMs por linha."""
     texto_limpo = re.sub(r"<[^>]+>", " ", texto_ou_html)
@@ -69,9 +84,14 @@ def parsear_convenio_142_texto(texto_ou_html: str) -> list[dict[str, Any]]:
             continue
         cest_7 = re.sub(r"\D", "", m_cest.group(1))
         seg_cod = cest_7[:2]
-        ncms_brutos = re.findall(r"\b(\d{4}(?:\.\d{2}(?:\.\d{2})?)?)\b", ln)
-        ncms_explodidos = [re.sub(r"\D", "", n) for n in ncms_brutos if len(re.sub(r"\D", "", n)) in {4, 6, 8}]
-        for ncm_d in dict.fromkeys(ncms_explodidos):
+        ln_sem_cest = ln[: m_cest.start()] + " " + ln[m_cest.end() :]
+        ncms_brutos = re.findall(r"\b(\d{4}(?:\.\d{2}(?:\.\d{2})?)?|\d{6}|\d{8})\b", ln_sem_cest)
+        ncms_explodidos: list[str] = []
+        for n in ncms_brutos:
+            n_d = re.sub(r"\D", "", n)
+            if len(n_d) in {2, 4, 6, 8} and n_d not in ncms_explodidos:
+                ncms_explodidos.append(n_d)
+        for ncm_d in ncms_explodidos:
             registros.append(
                 {
                     "anexo": anexo_atual,
@@ -79,12 +99,73 @@ def parsear_convenio_142_texto(texto_ou_html: str) -> list[dict[str, Any]]:
                     "cest": cest_7,
                     "ncm_limpo": ncm_d,
                     "ncm_raw": ", ".join(ncms_brutos),
+                    "tamanho_prefixo": len(ncm_d),
                     "descricao_item": ln[:240],
                     "bens_relacionados": "",
                     "fonte_url": URL_CONVENIO_142,
                 }
             )
     return registros
+
+
+def higienizar_convenio_142_sqlite(conn: sqlite3.Connection) -> dict[str, int]:
+    """Saneia de forma idempotente registros já gravados em convenio_142_anexos (explode + normalização)."""
+    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(convenio_142_anexos)").fetchall()}
+    if "tamanho_prefixo" not in cols:
+        conn.execute("ALTER TABLE convenio_142_anexos ADD COLUMN tamanho_prefixo INTEGER NOT NULL DEFAULT 0")
+
+    rows = conn.execute(
+        "SELECT id, anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, tamanho_prefixo, descricao_item, bens_relacionados, fonte_url FROM convenio_142_anexos"
+    ).fetchall()
+    atualizados = 0
+    explodidos = 0
+    for r in rows:
+        row_id = r[0]
+        anexo = str(r[1] or "")
+        cest_7 = re.sub(r"\D", "", str(r[3] or ""))
+        seg_cod = str(r[2] or cest_7[:2] or "")
+        ncm_atual = str(r[4] or "")
+        ncm_raw = str(r[5] or ncm_atual)
+        tam_atual = int(r[6] or 0)
+        desc = str(r[7] or "")
+        bens = str(r[8] or "")
+        fonte = str(r[9] or URL_CONVENIO_142)
+
+        codigos = explodir_codigos_ncm(ncm_atual) or explodir_codigos_ncm(ncm_raw)
+        if not codigos:
+            cod_unico = re.sub(r"\D", "", ncm_atual)
+            codigos = [cod_unico] if cod_unico else []
+        if not codigos:
+            continue
+
+        primeiro = codigos[0]
+        if ncm_atual != primeiro or str(r[3] or "") != cest_7 or tam_atual != len(primeiro):
+            try:
+                conn.execute(
+                    """
+                    UPDATE convenio_142_anexos
+                    SET cest = ?, ncm_limpo = ?, tamanho_prefixo = ?, segmento_codigo = ?
+                    WHERE id = ?
+                    """,
+                    (cest_7, primeiro, len(primeiro), seg_cod, row_id),
+                )
+                atualizados += 1
+            except sqlite3.IntegrityError:
+                pass
+
+        for extra in codigos[1:]:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO convenio_142_anexos (
+                    anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, tamanho_prefixo,
+                    descricao_item, bens_relacionados, fonte_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (anexo, seg_cod, cest_7, extra, ncm_raw, len(extra), desc, bens, fonte),
+            )
+            explodidos += int(cur.rowcount or 0)
+
+    return {"atualizados": atualizados, "explodidos": explodidos}
 
 
 def garantir_base_confaz_142_e_acordos(
@@ -98,14 +179,17 @@ def garantir_base_confaz_142_e_acordos(
     ins_ac = 0
 
     with conn:
+        hig_stats = higienizar_convenio_142_sqlite(conn)
         for anexo, seg, cest, ncm_l, desc in _SEED_CONVENIO_142:
+            ncm_d = re.sub(r"\D", "", ncm_l)
+            cest_d = re.sub(r"\D", "", cest)
             cur = conn.execute(
                 """
                 INSERT OR IGNORE INTO convenio_142_anexos (
-                    anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, descricao_item, fonte_url
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, tamanho_prefixo, descricao_item, fonte_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (anexo, seg, cest, ncm_l, ncm_l, desc, url_ok),
+                (anexo, seg, cest_d, ncm_d, ncm_l, len(ncm_d), desc, url_ok),
             )
             ins_142 += int(cur.rowcount or 0)
 
@@ -114,8 +198,8 @@ def garantir_base_confaz_142_e_acordos(
                 cur = conn.execute(
                     """
                     INSERT OR IGNORE INTO convenio_142_anexos (
-                        anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, descricao_item, bens_relacionados, fonte_url
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        anexo, segmento_codigo, cest, ncm_limpo, ncm_raw, tamanho_prefixo, descricao_item, bens_relacionados, fonte_url
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["anexo"],
@@ -123,6 +207,7 @@ def garantir_base_confaz_142_e_acordos(
                         item["cest"],
                         item["ncm_limpo"],
                         item["ncm_raw"],
+                        item["tamanho_prefixo"],
                         item["descricao_item"],
                         item["bens_relacionados"],
                         url_ok,
@@ -142,4 +227,9 @@ def garantir_base_confaz_142_e_acordos(
             )
             ins_ac += int(cur_a.rowcount or 0)
 
-    return {"convenio_142_inseridos": ins_142, "acordos_st_inseridos": ins_ac}
+    return {
+        "convenio_142_inseridos": ins_142,
+        "acordos_st_inseridos": ins_ac,
+        "higienizados": hig_stats["atualizados"],
+        "explodidos": hig_stats["explodidos"],
+    }

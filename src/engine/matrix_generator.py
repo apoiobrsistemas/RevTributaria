@@ -1045,8 +1045,59 @@ def avaliar_arvore_booleana_ncm(
     tem_reducao_base: bool | None = None,
     tem_isencao_ou_desoneracao: bool | None = None,
     regime_tributario: str = "Lucro Real",
+    segmentos_multi_cest: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Árvore de Questionamento Booleano (Sim/Não) por hipótese legal para um NCM."""
+    if segmentos_multi_cest and len(segmentos_multi_cest) > 1:
+        linhas_comb: list[dict[str, Any]] = []
+        regimes_comb: list[str] = []
+        hipoteses_comb: dict[str, Any] = {}
+        for seg in segmentos_multi_cest:
+            seg_tem_st = bool(seg.get("tem_st"))
+            cest_seg = str(seg.get("cest") or "")
+            cest_fmt = str(seg.get("cest_formatado") or cest_seg)
+            seg_cod = str(seg.get("segmento_codigo") or cest_seg[:2])
+            reg_seg = dict(seg.get("regra_estadual") or regra_estadual or {})
+            reg_seg["cest"] = cest_seg
+            if seg.get("mva_original") is not None:
+                reg_seg.setdefault("margem_st", seg.get("mva_original"))
+            if seg.get("aliquota_interna") is not None:
+                reg_seg.setdefault("aliquota_icms", seg.get("aliquota_interna"))
+            if seg.get("artigo_legal"):
+                reg_seg["dispositivo_legal"] = seg.get("artigo_legal")
+            res_seg = avaliar_arvore_booleana_ncm(
+                ncm=ncm,
+                uf_origem=uf_origem,
+                uf_destino=uf_destino,
+                regra_estadual=reg_seg,
+                regra_federal=regra_federal,
+                eh_tributado_integralmente=(not seg_tem_st) if eh_tributado_integralmente is None else eh_tributado_integralmente,
+                pode_ser_importado=pode_ser_importado,
+                pode_ter_st=seg_tem_st if pode_ter_st is None else pode_ter_st,
+                tem_reducao_base=tem_reducao_base,
+                tem_isencao_ou_desoneracao=tem_isencao_ou_desoneracao,
+                regime_tributario=regime_tributario,
+                segmentos_multi_cest=None,
+            )
+            status_lbl = "ST Vigente" if seg_tem_st else "Excluído ST / Normal"
+            tag = f"[CEST {cest_fmt} · Seg. {seg_cod} · {status_lbl}]"
+            for r_ln in res_seg["linhas"]:
+                r_copy = dict(r_ln)
+                r_copy["Segmento / CEST"] = tag
+                r_copy["Natureza de Operação"] = f"{r_copy['Natureza de Operação']} {tag}"
+                linhas_comb.append(r_copy)
+            for r_nm in res_seg["regimes_ativos"]:
+                if r_nm not in regimes_comb:
+                    regimes_comb.append(r_nm)
+            hipoteses_comb = res_seg["hipoteses"]
+        return {
+            "ncm": "".join(c for c in str(ncm or "") if c.isdigit()).zfill(8)[:8],
+            "hipoteses": hipoteses_comb,
+            "regimes_ativos": regimes_comb,
+            "segmentos_avaliados": list(segmentos_multi_cest),
+            "linhas": linhas_comb,
+        }
+
     ncm_limpo = "".join(c for c in str(ncm or "") if c.isdigit()).zfill(8)[:8]
     uf_o = uf_origem.upper()[:2]
     uf_d = uf_destino.upper()[:2]

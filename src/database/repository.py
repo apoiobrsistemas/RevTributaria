@@ -65,6 +65,7 @@ def buscar_regra_estadual_icms(
     data_referencia: date | str | None = None,
     apenas_aceitas: bool = False,
     permitir_regra_geral_uf: bool = True,
+    cest_estrito: bool = False,
 ) -> dict[str, Any] | None:
     """Busca hierárquica em 5 camadas (NCM+CEST -> NCM -> Prefixo 6/4 -> Segmento CEST -> Regra Geral UF)."""
     ref = _iso_date(data_referencia)
@@ -100,25 +101,28 @@ def buscar_regra_estadual_icms(
         d["regra_generica_uf"] = generica
         return d
 
+    cest_filtro = f"AND ({_CEST_SQL} = ? OR {_CEST_SQL} = '')" if (cest_estrito and cest_limpo) else ""
+    cest_filtro_params: list[Any] = [cest_limpo] if (cest_estrito and cest_limpo) else []
+
     # Camada 1: Exato 8 dígitos + CEST
     if ncm_limpo and cest_limpo:
         r = _exec(f"AND {_NCM_SQL} = ? AND {_CEST_SQL} = ?", [ncm_limpo, cest_limpo], 1)
         if r:
             return r
 
-    # Camada 2: Exato 8 dígitos (sem filtro restritivo de CEST)
+    # Camada 2: Exato 8 dígitos (sem filtro restritivo de CEST, salvo cest_estrito=True)
     if ncm_limpo:
-        r = _exec(f"AND {_NCM_SQL} = ?", [ncm_limpo], 2)
+        r = _exec(f"AND {_NCM_SQL} = ? {cest_filtro}", [ncm_limpo] + cest_filtro_params, 2)
         if r:
             return r
 
     # Camada 3: Prefixo 6 dígitos (subposição SH) -> Prefixo 4 dígitos (posição SH)
     if len(ncm_limpo) >= 6:
-        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 6)", [ncm_limpo], 3)
+        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 6) {cest_filtro}", [ncm_limpo] + cest_filtro_params, 3)
         if r:
             return r
     if len(ncm_limpo) >= 4:
-        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 4)", [ncm_limpo], 3)
+        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 4) {cest_filtro}", [ncm_limpo] + cest_filtro_params, 3)
         if r:
             return r
 
@@ -132,6 +136,58 @@ def buscar_regra_estadual_icms(
     if permitir_regra_geral_uf:
         return _exec("AND ncm = ''", [], 5, generica=True)
     return None
+
+
+def buscar_convenio_142_por_prefixo(
+    conn: sqlite3.Connection,
+    ncm: str,
+    cest: str = "",
+) -> list[dict[str, Any]]:
+    """Busca hierárquica (8 -> 6 -> 4 -> 2 dígitos) no Convênio 142/2018 retornando todos os CESTs/Segmentos."""
+    ncm_8 = normalizar_ncm(ncm).zfill(8)[:8]
+    cest_7 = normalizar_cest(cest)
+    prefixos = list(dict.fromkeys([ncm_8[:8], ncm_8[:6], ncm_8[:4], ncm_8[:2]]))
+    prefixos = [p for p in prefixos if p]
+    if not prefixos and not cest_7:
+        return []
+
+    ncm_expr = "REPLACE(REPLACE(TRIM(ncm_limpo), '.', ''), '-', '')"
+    cest_expr = "REPLACE(REPLACE(TRIM(cest), '.', ''), '-', '')"
+    placeholders = ",".join("?" for _ in prefixos)
+    if cest_7:
+        sql = f"""
+            SELECT * FROM convenio_142_anexos
+            WHERE ({ncm_expr} IN ({placeholders}) OR {cest_expr} = ?)
+              AND elegivel_st_nacional = 1
+            ORDER BY LENGTH({ncm_expr}) DESC, id ASC
+        """
+        params: list[Any] = prefixos + [cest_7]
+    else:
+        sql = f"""
+            SELECT * FROM convenio_142_anexos
+            WHERE {ncm_expr} IN ({placeholders})
+              AND elegivel_st_nacional = 1
+            ORDER BY LENGTH({ncm_expr}) DESC, id ASC
+        """
+        params = prefixos
+
+    rows = conn.execute(sql, params).fetchall()
+    resultados: list[dict[str, Any]] = []
+    vistos: set[tuple[str, str]] = set()
+    for r in rows:
+        d = dict(r)
+        cest_norm = normalizar_cest(str(d.get("cest") or ""))
+        seg_norm = str(d.get("segmento_codigo") or cest_norm[:2]).strip()
+        chave = (cest_norm, seg_norm)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        d["cest"] = cest_norm
+        d["segmento_codigo"] = seg_norm
+        d["ncm_limpo"] = normalizar_ncm(str(d.get("ncm_limpo") or ""))
+        d["tamanho_prefixo"] = len(d["ncm_limpo"])
+        resultados.append(d)
+    return resultados
 
 
 def buscar_regra_federal(

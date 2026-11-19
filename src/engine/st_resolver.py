@@ -7,29 +7,51 @@ import sqlite3
 from datetime import date
 from typing import Any
 
-from src.database.repository import buscar_regra_estadual_icms, normalizar_cest, normalizar_ncm
+from src.database.repository import (
+    buscar_convenio_142_por_prefixo,
+    buscar_regra_estadual_icms,
+    normalizar_cest,
+    normalizar_ncm,
+)
 from src.database.schema_fase2 import consultar_protocolo_st
 from src.legislation.confaz_ingestor import garantir_base_confaz_142_e_acordos
 
 
-def _buscar_convenio_142(conn: sqlite3.Connection, ncm_8: str, cest_7: str = "") -> list[dict[str, Any]]:
-    """Busca elegibilidade no Convênio ICMS 142/2018 em cascata 8 -> 6 -> 4 dígitos (e por CEST)."""
-    garantir_base_confaz_142_e_acordos(conn)
-    candidatos = [ncm_8]
-    if len(ncm_8) >= 6:
-        candidatos.append(ncm_8[:6])
-    if len(ncm_8) >= 4:
-        candidatos.append(ncm_8[:4])
+def _formatar_cest(cest_7: str) -> str:
+    d = normalizar_cest(cest_7)
+    if len(d) == 7:
+        return f"{d[:2]}.{d[2:5]}.{d[5:]}"
+    return cest_7
 
-    placeholders = ",".join("?" for _ in candidatos)
-    sql = f"""
-        SELECT * FROM convenio_142_anexos
-        WHERE ncm_limpo IN ({placeholders})
-           OR (? != '' AND cest = ?)
-        ORDER BY length(ncm_limpo) DESC, id ASC
-    """
-    rows = conn.execute(sql, candidatos + [cest_7, cest_7]).fetchall()
-    return [dict(r) for r in rows]
+
+def _formatar_prefixo_ncm(pref: str) -> str:
+    d = normalizar_ncm(pref)
+    if len(d) == 8:
+        return f"{d[:4]}.{d[4:6]}.{d[6:]}"
+    if len(d) == 6:
+        return f"{d[:4]}.{d[4:6]}"
+    return d
+
+
+def _descrever_passo_1(itens_142: list[dict[str, Any]]) -> str:
+    if not itens_142:
+        return "Não Elegível — NCM não consta nos Anexos II a XXVIII do Convênio ICMS 142/2018."
+    pref = str(itens_142[0].get("ncm_limpo") or "")
+    tipo_map = {8: "item 8 dígitos", 6: "subposição 6 dígitos", 4: "posição 4 dígitos", 2: "capítulo 2 dígitos"}
+    tipo_lbl = tipo_map.get(len(pref), f"{len(pref)} dígitos")
+    cests_txt = " e ".join(
+        f"{_formatar_cest(str(it.get('cest') or ''))} [Seg. {it.get('segmento_codigo', '')} - {it.get('anexo', '')}]"
+        for it in itens_142
+    )
+    qtd = len(itens_142)
+    suf = "CEST localizado" if qtd == 1 else "CESTs localizados"
+    return f"Elegível via {tipo_lbl} '{_formatar_prefixo_ncm(pref)}' — {qtd} {suf}: {cests_txt}."
+
+
+def _buscar_convenio_142(conn: sqlite3.Connection, ncm_8: str, cest_7: str = "") -> list[dict[str, Any]]:
+    """Busca elegibilidade no Convênio ICMS 142/2018 em cascata 8 -> 6 -> 4 -> 2 dígitos (todos os CESTs)."""
+    garantir_base_confaz_142_e_acordos(conn)
+    return buscar_convenio_142_por_prefixo(conn, ncm_8, cest_7)
 
 
 def _buscar_acordo_interestadual(
@@ -111,59 +133,131 @@ def resolver_st_3_passos(
 
     cests_possiveis = list(dict.fromkeys(str(it["cest"]) for it in itens_142 if it.get("cest")))
     segmentos = list(dict.fromkeys(str(it["segmento_codigo"]) for it in itens_142 if it.get("segmento_codigo")))
-    cest_ef = cest_7 or (cests_possiveis[0] if cests_possiveis else "")
+    passo_1_msg = _descrever_passo_1(itens_142)
 
     # ------------------------------------------------------------------
-    # PASSO 2 — Obrigação Interna na UF de Destino (RICMS / Portarias SRE)
+    # PASSO 2 & PASSO 3 — Avaliação Individual por CEST / Segmento na UF de Destino
     # ------------------------------------------------------------------
-    reg_dest = buscar_regra_estadual_icms(
-        conn,
-        uf_origem=uf_d,
-        uf_destino=uf_d,
-        ncm=ncm_8,
-        cest=cest_ef,
-        data_referencia=ref,
-        permitir_regra_geral_uf=False,
-    ) or buscar_regra_estadual_icms(
-        conn,
-        uf_origem=uf_o,
-        uf_destino=uf_d,
-        ncm=ncm_8,
-        cest=cest_ef,
-        data_referencia=ref,
-        permitir_regra_geral_uf=False,
-    )
+    itens_avaliar = [it for it in itens_142 if not cest_7 or str(it.get("cest")) == cest_7] or itens_142
+    segmentos_avaliados: list[dict[str, Any]] = []
 
-    proto_dest = consultar_protocolo_st(
-        conn,
-        uf_origem=uf_o,
-        uf_destino=uf_d,
-        ncm=ncm_8,
-        cest=cest_ef,
-        data_operacao=ref,
-    )
+    for it in itens_avaliar:
+        cest_item = str(it.get("cest") or "")
+        seg_item = str(it.get("segmento_codigo") or cest_item[:2])
+        reg_dest = buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_d,
+            uf_destino=uf_d,
+            ncm=ncm_8,
+            cest=cest_item,
+            data_referencia=ref,
+            permitir_regra_geral_uf=False,
+            cest_estrito=True,
+        ) or buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_8,
+            cest=cest_item,
+            data_referencia=ref,
+            permitir_regra_geral_uf=False,
+            cest_estrito=True,
+        )
+        proto_dest = consultar_protocolo_st(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_8,
+            cest=cest_item,
+            data_operacao=ref,
+        )
 
-    tem_st_regra = False
-    mva_orig = 0.0
-    aliq_int = 18.0
-    fcp = 0.0
-    artigo = ""
+        tem_st_seg = False
+        mva_seg = 0.0
+        aliq_seg = 18.0
+        fcp_seg = 0.0
+        artigo_seg = ""
 
-    if reg_dest is not None:
-        mva_orig = float(reg_dest.get("margem_st") or 0.0)
-        aliq_int = float(reg_dest.get("aliquota_icms") or 18.0)
-        fcp = float(reg_dest.get("aliquota_fcp") or 0.0)
-        cst_reg = str(reg_dest.get("cst_icms") or "").strip()
-        artigo = str(reg_dest.get("dispositivo_legal") or "")
-        tem_st_regra = bool(mva_orig > 0 or float(reg_dest.get("aliquota_icms_st") or 0.0) > 0 or cst_reg in {"10", "30", "60", "70"})
-    elif proto_dest is not None and bool(proto_dest.get("possui_acordo_bilateral", 1)):
-        tem_st_regra = True
-        mva_orig = float(proto_dest.get("mva_original") or 0.0)
-        aliq_int = float(proto_dest.get("aliquota_interna_destino") or 18.0)
-        fcp = float(proto_dest.get("fcp_destino") or 0.0)
-        artigo = str(proto_dest.get("ato_legal") or "")
+        if reg_dest is not None:
+            mva_seg = float(reg_dest.get("margem_st") or 0.0)
+            aliq_seg = float(reg_dest.get("aliquota_icms") or 18.0)
+            fcp_seg = float(reg_dest.get("aliquota_fcp") or 0.0)
+            cst_reg = str(reg_dest.get("cst_icms") or "").strip()
+            artigo_seg = str(reg_dest.get("dispositivo_legal") or "")
+            tem_st_seg = bool(mva_seg > 0 or float(reg_dest.get("aliquota_icms_st") or 0.0) > 0 or cst_reg in {"10", "30", "60", "70"})
+        elif proto_dest is not None and bool(proto_dest.get("possui_acordo_bilateral", 1)):
+            tem_st_seg = True
+            mva_seg = float(proto_dest.get("mva_original") or 0.0)
+            aliq_seg = float(proto_dest.get("aliquota_interna_destino") or 18.0)
+            fcp_seg = float(proto_dest.get("fcp_destino") or 0.0)
+            artigo_seg = str(proto_dest.get("ato_legal") or "")
 
-    if not tem_st_regra:
+        recolhe_seg = "NAO_APLICAVEL"
+        acordo_seg: str | None = None
+        passo_3_seg = "Não aplicável (sem ST na UF de destino)."
+        if tem_st_seg:
+            acordo_row = _buscar_acordo_interestadual(
+                conn,
+                uf_origem=uf_o,
+                uf_destino=uf_d,
+                ncm_8=ncm_8,
+                segmentos=[seg_item],
+                data_ref=ref,
+            )
+            if acordo_row is None and proto_dest is not None:
+                acordo_row = {"numero_acordo": proto_dest.get("ato_legal"), "tipo_acordo": "PROTOCOLO_BILATERAL"}
+            if uf_o == uf_d:
+                recolhe_seg = "INTERNA_SUBSTITUTO"
+                acordo_seg = artigo_seg
+                passo_3_seg = f"Operação interna ({uf_d} -> {uf_d}): substituição tributária interna."
+            elif acordo_row is not None:
+                recolhe_seg = "REMETENTE_RETIDO"
+                acordo_seg = str(acordo_row.get("numero_acordo") or "Convênio/Protocolo")
+                passo_3_seg = f"Acordo vigente ({acordo_seg}) — Retenção pelo remetente + MVA Ajustado."
+            else:
+                recolhe_seg = "DESTINATARIO_ANTECIPACAO"
+                acordo_seg = "Sem Acordo (Antecipação Art. 426-A / GNRE)"
+                passo_3_seg = "Sem Acordo Interestadual — Antecipação obrigatória na entrada (Art. 426-A RICMS / GNRE)."
+
+        segmentos_avaliados.append(
+            {
+                "cest": cest_item,
+                "cest_formatado": _formatar_cest(cest_item),
+                "segmento_codigo": seg_item,
+                "anexo": str(it.get("anexo") or ""),
+                "descricao_item": str(it.get("descricao_item") or ""),
+                "ncm_prefixo_casado": str(it.get("ncm_limpo") or ""),
+                "tem_st": tem_st_seg,
+                "recolhe_st": recolhe_seg,
+                "acordo_aplicado": acordo_seg,
+                "mva_original": mva_seg,
+                "aliquota_interna": aliq_seg,
+                "fcp": fcp_seg,
+                "artigo_legal": artigo_seg or (f"Sem cobrança interna de ST em {uf_d} na data {ref}" if not tem_st_seg else "RICMS"),
+                "passo_3_resumo": passo_3_seg,
+                "regra_estadual": reg_dest,
+            }
+        )
+
+    # Resumo consolidado do Passo 2
+    if len(segmentos_avaliados) == 1:
+        s0 = segmentos_avaliados[0]
+        if s0["tem_st"]:
+            passo_2_msg = f"Sujeito a ST em {uf_d} (CEST {s0['cest_formatado']} [Seg. {s0['segmento_codigo']}] — {s0['artigo_legal']} | IVA-ST Original {s0['mva_original']:.2f}%)."
+        else:
+            passo_2_msg = f"Fora da ST em {uf_d} na data {ref} (CEST {s0['cest_formatado']} [Seg. {s0['segmento_codigo']}] — {s0['artigo_legal']} | Tributado Integralmente)."
+    else:
+        partes_p2 = []
+        for s in segmentos_avaliados:
+            if s["tem_st"]:
+                partes_p2.append(f"CEST {s['cest_formatado']} [Seg. {s['segmento_codigo']}]: ST vigente (IVA-ST {s['mva_original']:.2f}% | {s['artigo_legal']})")
+            else:
+                partes_p2.append(f"CEST {s['cest_formatado']} [Seg. {s['segmento_codigo']}]: Fora da ST / Tributado Integralmente ({s['artigo_legal']})")
+        passo_2_msg = f"{len(segmentos_avaliados)} segmentos avaliados em {uf_d}: " + " | ".join(partes_p2) + "."
+
+    principal = next((s for s in segmentos_avaliados if s["tem_st"]), segmentos_avaliados[0])
+
+    if not principal["tem_st"]:
         return {
             "ncm": ncm_8,
             "uf_origem": uf_o,
@@ -172,6 +266,7 @@ def resolver_st_3_passos(
             "elegivel_conv_142": True,
             "cests_possiveis": cests_possiveis,
             "segmentos": segmentos,
+            "segmentos_avaliados": segmentos_avaliados,
             "obrigacao_uf_destino": False,
             "tem_st": False,
             "recolhe_st": "NAO_APLICAVEL",
@@ -179,40 +274,13 @@ def resolver_st_3_passos(
             "cfop_entrada": "2.102" if uf_o != uf_d else "1.102",
             "cst_entrada": "0.00",
             "mva_original": 0.0,
-            "aliquota_interna": aliq_int,
-            "fcp": fcp,
-            "artigo_legal": artigo or f"Sem cobrança interna de ST em {uf_d} na data {ref}",
-            "passo_1_resumo": f"Elegível (Conv. 142/2018) — CEST(s): {', '.join(cests_possiveis)}",
-            "passo_2_resumo": f"Fora da ST em {uf_d} na data {ref} ({artigo or 'Tributado Integralmente'}).",
+            "aliquota_interna": principal["aliquota_interna"],
+            "fcp": principal["fcp"],
+            "artigo_legal": principal["artigo_legal"],
+            "passo_1_resumo": passo_1_msg,
+            "passo_2_resumo": passo_2_msg,
             "passo_3_resumo": "Não aplicável (sem ST na UF de destino).",
         }
-
-    # ------------------------------------------------------------------
-    # PASSO 3 — Responsável na Operação Interestadual (uf_origem -> uf_destino)
-    # ------------------------------------------------------------------
-    acordo = _buscar_acordo_interestadual(
-        conn,
-        uf_origem=uf_o,
-        uf_destino=uf_d,
-        ncm_8=ncm_8,
-        segmentos=segmentos,
-        data_ref=ref,
-    )
-    if acordo is None and proto_dest is not None:
-        acordo = {"numero_acordo": proto_dest.get("ato_legal"), "tipo_acordo": "PROTOCOLO_BILATERAL"}
-
-    if uf_o == uf_d:
-        recolhe_st = "INTERNA_SUBSTITUTO"
-        passo_3 = f"Operação interna ({uf_d} -> {uf_d}): substituição tributária interna."
-        acordo_nome = artigo
-    elif acordo is not None:
-        recolhe_st = "REMETENTE_RETIDO"
-        acordo_nome = str(acordo.get("numero_acordo") or "Convênio/Protocolo")
-        passo_3 = f"Acordo vigente ({acordo_nome}) — Retenção pelo remetente + MVA Ajustado."
-    else:
-        recolhe_st = "DESTINATARIO_ANTECIPACAO"
-        acordo_nome = "Sem Acordo (Antecipação Art. 426-A / GNRE)"
-        passo_3 = "Sem Acordo Interestadual — Antecipação obrigatória na entrada (Art. 426-A RICMS / GNRE)."
 
     return {
         "ncm": ncm_8,
@@ -222,19 +290,20 @@ def resolver_st_3_passos(
         "elegivel_conv_142": True,
         "cests_possiveis": cests_possiveis,
         "segmentos": segmentos,
+        "segmentos_avaliados": segmentos_avaliados,
         "obrigacao_uf_destino": True,
         "tem_st": True,
-        "recolhe_st": recolhe_st,
-        "acordo_aplicado": acordo_nome,
+        "recolhe_st": principal["recolhe_st"],
+        "acordo_aplicado": principal["acordo_aplicado"],
         "cfop_entrada": "2.403" if uf_o != uf_d else "1.403",
         "cst_entrada": "0.60",
-        "mva_original": mva_orig,
-        "aliquota_interna": aliq_int,
-        "fcp": fcp,
-        "artigo_legal": artigo,
-        "passo_1_resumo": f"Elegível (Conv. 142/2018) — CEST(s): {', '.join(cests_possiveis)}",
-        "passo_2_resumo": f"Sujeito a ST em {uf_d} ({artigo or 'RICMS'} | IVA-ST Original {mva_orig:.2f}%).",
-        "passo_3_resumo": passo_3,
+        "mva_original": principal["mva_original"],
+        "aliquota_interna": principal["aliquota_interna"],
+        "fcp": principal["fcp"],
+        "artigo_legal": principal["artigo_legal"],
+        "passo_1_resumo": passo_1_msg,
+        "passo_2_resumo": passo_2_msg,
+        "passo_3_resumo": principal["passo_3_resumo"],
     }
 
 
@@ -303,10 +372,11 @@ def resolver_st_saida(
     cests_possiveis = list(dict.fromkeys(str(it["cest"]) for it in itens_142 if it.get("cest")))
     segmentos = list(dict.fromkeys(str(it["segmento_codigo"]) for it in itens_142 if it.get("segmento_codigo")))
     cest_ef = cest_7 or (cests_possiveis[0] if cests_possiveis else "")
+    passo_1_msg_saida = _descrever_passo_1(itens_142)
 
     # Passo 2 — Vínculo de ST na Origem
     reg_orig = buscar_regra_estadual_icms(
-        conn, uf_origem=uf_o, uf_destino=uf_o, ncm=ncm_8, cest=cest_ef, data_referencia=ref, permitir_regra_geral_uf=False
+        conn, uf_origem=uf_o, uf_destino=uf_o, ncm=ncm_8, cest=cest_ef, data_referencia=ref, permitir_regra_geral_uf=False, cest_estrito=True
     )
     st_na_origem = bool(
         reg_orig
@@ -340,7 +410,7 @@ def resolver_st_saida(
                 "difal_pct": 0.0,
                 "acordo_aplicado": reg_orig.get("dispositivo_legal") if reg_orig else None,
                 "observacao": "Saída interna substituída (ST encerrada na cadeia anterior).",
-                "passo_1_resumo": f"Elegível (Conv. 142/2018) — CEST: {cest_ef}",
+                "passo_1_resumo": passo_1_msg_saida,
                 "passo_2_resumo": f"ST vinculada na origem ({uf_o}) com encerramento.",
                 "passo_3_resumo": f"Saída Interna: CFOP 5.405 | CST {orig_dig}.60 | CSOSN {orig_dig}.500 (sem destaque ST).",
                 "passo_4_resumo": "Operação interna (dispensa protocolo interestadual).",
