@@ -328,3 +328,36 @@ def indexar_nts_portal_nfe(
                 )
                 inseridas += 1
     return inseridas
+
+
+def parsear_tabela_cbenef_html(html: str, uf: str) -> list[dict[str, str]]:
+    """Extrai códigos cBenef estaduais (ex.: SP020003, PR820001, RS040001) de HTML oficial."""
+    uf_u = uf.strip().upper()
+    padrao = re.compile(rf"\b({uf_u}\d{{6}})\b", re.IGNORECASE)
+    vistos: set[str] = set()
+    saida: list[dict[str, str]] = []
+    for m in padrao.finditer(html or ""):
+        cod = m.group(1).upper()
+        if cod in vistos:
+            continue
+        vistos.add(cod)
+        saida.append({"uf": uf_u, "codigo_cbenef": cod})
+    return saida
+
+
+def parsear_protocolos_confaz_html(html: str) -> list[dict[str, str]]:
+    """Extrai referências a Protocolos e Convênios ICMS do portal oficial do CONFAZ."""
+    padrao = re.compile(
+        r"((?:Protocolo|Conv[eê]nio)\s+ICMS\s+(?:n[º°]?\s*)?\d{1,4}/\d{2,4})",
+        re.IGNORECASE,
+    )
+    vistos: set[str] = set()
+    saida: list[dict[str, str]] = []
+    for m in padrao.finditer(html or ""):
+        ato = re.sub(r"\s+", " ", m.group(1)).strip()
+        chave = ato.upper()
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append({"ato_legal": ato})
+    return saida

@@ -19,6 +19,7 @@ from src.database.naturezas import (
 from src.engine.fiscal_engine import (
     ContextoOperacaoFiscal,
     avaliar_operacao_bidirecional,
+    resolver_parametros_estaduais,
 )
 from src.ui.design_system import formatar_ncm_mascara
 
@@ -272,7 +273,47 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         proto_dir = t3.checkbox("Possui Protocolo/Convênio ST", value=False, key="cm_dir_proto")
         retido_dir = t4.checkbox("ST já retida na origem", value=False, key="cm_dir_ret")
 
-        ncm_ctx = str(filtradas_ncm := (linhas[0].get("NCM") if linhas else "85071090"))
+        ncm_ctx = str(linhas[0].get("NCM") if linhas else "85071090")
+        auto_fase2 = st.checkbox(
+            "🤖 Preenchimento Automático via Matriz Bilateral & cBenef UF",
+            value=True,
+            key="cm_dir_auto_fase2",
+        )
+        _conn_f2 = init_db(db_path)
+        try:
+            params_f2 = resolver_parametros_estaduais(
+                _conn_f2,
+                uf_origem=uf_orig,
+                uf_destino=uf_dest_dir,
+                ncm=ncm_ctx,
+                cst=cst_dir,
+                direcao=dir_sel,
+                data_operacao=data_ref.isoformat(),
+            )
+        finally:
+            _conn_f2.close()
+
+        cbenef_validos_lista = params_f2.get("cbenef_validos_uf") or []
+        mva_efetiva = float(params_f2["mva_original"]) if (auto_fase2 and params_f2["protocolo_encontrado"]) else float(mva_dir)
+        tem_st_efetivo = bool(params_f2["tem_st"]) if (auto_fase2 and params_f2["protocolo_encontrado"]) else tem_st_dir
+        proto_efetivo = bool(params_f2["tem_protocolo_st"]) if (auto_fase2 and params_f2["protocolo_encontrado"]) else proto_dir
+        cbenef_efetivo = cbenef_dir.strip() or (params_f2["cbenef_sugerido"] if (auto_fase2 and cst_dir in {"20", "30", "40", "41", "50", "51", "70"}) else "")
+
+        with st.container(border=True):
+            st.markdown("**📜 Acordo Interestadual & Validação cBenef**")
+            ac1, ac2 = st.columns([1.3, 1.2])
+            ac1.markdown(
+                f"**Protocolo / Convênio:** `{params_f2['ato_legal_st']}`  \n"
+                f"**Acordo Bilateral:** `{'SIM' if params_f2['tem_protocolo_st'] else 'NÃO'}` | "
+                f"**MVA Original:** `{float(params_f2['mva_original']):.2f}%`"
+            )
+            if cbenef_validos_lista:
+                opcoes_cb = [f"{c['codigo_cbenef']} — {c['descricao'][:55]}" for c in cbenef_validos_lista]
+                ac2.markdown(f"**cBenef válidos em {params_f2['uf_cbenef']} (CST {cst_dir}):**")
+                ac2.caption(" | ".join(opcoes_cb[:4]))
+            else:
+                ac2.markdown(f"**Trava CST x cBenef ({params_f2['uf_cbenef']}):** Sem cBenef obrigatório cadastrado para CST `{cst_dir}`.")
+
         res_dir = avaliar_operacao_bidirecional(
             ContextoOperacaoFiscal(
                 direcao=dir_sel,
@@ -282,14 +323,18 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 ncm=ncm_ctx,
                 valor_produto=Decimal(str(vlr_dir)),
                 cst_ou_csosn=cst_dir,
-                cbenef=cbenef_dir,
+                cbenef=cbenef_efetivo,
+                aliquota_interna_destino=params_f2["aliquota_interna_destino"] if (auto_fase2 and params_f2["protocolo_encontrado"]) else None,
+                aliquota_fcp=params_f2["fcp_destino"] if (auto_fase2 and params_f2["protocolo_encontrado"]) else None,
                 reducao_bc_pct=Decimal(str(red_dir)),
-                tem_st=tem_st_dir,
-                tem_protocolo_st=proto_dir,
+                tem_st=tem_st_efetivo,
+                tem_protocolo_st=proto_efetivo,
                 st_retida_na_origem=retido_dir,
-                mva_original_pct=Decimal(str(mva_dir)),
+                mva_original_pct=Decimal(str(mva_efetiva)),
                 fornecedor_simples_nacional=sn_forn,
-            )
+            ),
+            cbenef_validos=cbenef_validos_lista,
+            ato_legal_st=params_f2["ato_legal_st"],
         )
 
         risco = res_dir["semaforo_risco"]

@@ -165,6 +165,8 @@ def avaliar_operacao_bidirecional(
     *,
     regra_est: Mapping[str, Any] | None = None,
     regra_fed: Mapping[str, Any] | None = None,
+    cbenef_validos: list[Mapping[str, Any]] | None = None,
+    ato_legal_st: str = "",
 ) -> dict[str, Any]:
     """Executa o roteador bidirecional completo (Saída x Entrada Inversa) em Decimal puro."""
     direcao = ctx.direcao.strip().upper()
@@ -324,9 +326,24 @@ def avaliar_operacao_bidirecional(
     alertas: list[str] = []
     risco = "VERDE"
 
-    if cst_2 in {"20", "30", "40", "41", "50", "51", "70"} and not ctx.cbenef.strip():
+    cbenef_val = ctx.cbenef.strip().upper()
+    codigos_validos = [str(c.get("codigo_cbenef") or "").upper() for c in (cbenef_validos or []) if c.get("codigo_cbenef")]
+
+    if cst_2 in {"20", "30", "40", "41", "50", "51", "70"}:
+        if not cbenef_val:
+            sugestao = f" Sugestões vigentes em {uf_legislacao_aplicavel}: {', '.join(codigos_validos[:5])}." if codigos_validos else ""
+            alertas.append(
+                f"BLOQUEIO SEFAZ (Rejeição 930/931 — NT 2019.001 / SRE 70/2025): CST {cst_norm} exige preenchimento de cBenef válido na UF {uf_legislacao_aplicavel}.{sugestao}"
+            )
+            risco = "VERMELHO"
+        elif codigos_validos and cbenef_val not in codigos_validos:
+            alertas.append(
+                f"BLOQUEIO SEFAZ (Rejeição 932): cBenef '{cbenef_val}' inválido, expirado ou incompatível com CST {cst_norm} em {uf_legislacao_aplicavel}. Válidos: {', '.join(codigos_validos[:5])}."
+            )
+            risco = "VERMELHO"
+    elif cst_2 in {"00", "10", "60"} and cbenef_val:
         alertas.append(
-            f"BLOQUEIO SEFAZ (Portaria SRE 70/2025 / NT 2019.001): CST {cst_norm} exige preenchimento de cBenef válido na UF {uf_legislacao_aplicavel}."
+            f"REJEIÇÃO SEFAZ (933 — NT 2019.001): cBenef '{cbenef_val}' incompatível com CST {cst_norm} (tributação sem benefício de isenção/redução)."
         )
         risco = "VERMELHO"
 
@@ -396,6 +413,8 @@ def avaliar_operacao_bidirecional(
         "cfop_esperado": cfop_esperado,
         "cst_ou_csosn": cst_norm,
         "cbenef_obrigatorio": cst_2 in {"20", "30", "40", "41", "50", "51", "70"},
+        "cbenef_validos_uf": codigos_validos,
+        "ato_legal_st": ato_legal_st,
         "bc_icms_proprio": str(bc_icms_proprio),
         "aliquota_icms_proprio": str(aliq_propria),
         "valor_icms_proprio": str(valor_icms_proprio),
@@ -415,4 +434,76 @@ def avaliar_operacao_bidirecional(
         "alertas_preventivos": alertas,
         "bases_legais": bases_legais,
         "memoria_calculo": memoria,
+    }
+
+
+def resolver_parametros_estaduais(
+    conn: Any,
+    *,
+    uf_origem: str,
+    uf_destino: str,
+    ncm: str,
+    cest: str = "",
+    cst: str = "00",
+    direcao: str = "SAIDA",
+    data_operacao: str | None = None,
+) -> dict[str, Any]:
+    """Resolve automaticamente Protocolo/Convênio ST bilateral e cBenef válidos por UF/CST/Vigência."""
+    from src.database.schema_fase2 import consultar_cbenef_uf, consultar_protocolo_st
+
+    uf_o = uf_origem.strip().upper()
+    uf_d = uf_destino.strip().upper()
+    dir_u = direcao.strip().upper()
+    uf_cbenef = uf_d if dir_u == "ENTRADA" else uf_o
+
+    proto = consultar_protocolo_st(
+        conn,
+        uf_origem=uf_o,
+        uf_destino=uf_d,
+        ncm=ncm,
+        cest=cest,
+        data_operacao=data_operacao,
+    )
+    cbenef_lista = consultar_cbenef_uf(
+        conn,
+        uf=uf_cbenef,
+        cst=cst,
+        ncm=ncm,
+        data_operacao=data_operacao,
+    )
+
+    aliq_modal_d, fcp_padrao_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), ZERO))
+    if proto is not None:
+        return {
+            "protocolo_encontrado": True,
+            "tem_protocolo_st": bool(proto["possui_acordo_bilateral"]),
+            "tem_st": True,
+            "cest_resolvido": str(proto.get("cest") or cest),
+            "mva_original": Decimal(str(proto.get("mva_original") or 0)),
+            "aliquota_interna_destino": Decimal(str(proto.get("aliquota_interna_destino") or aliq_modal_d)),
+            "fcp_destino": Decimal(str(proto.get("fcp_destino") or fcp_padrao_d)),
+            "modalidade_base_st": str(proto.get("modalidade_base_st") or "MVA"),
+            "pmpf_valor": Decimal(str(proto["pmpf_valor"])) if proto.get("pmpf_valor") is not None else ZERO,
+            "ato_legal_st": str(proto.get("ato_legal") or ""),
+            "observacao_st": str(proto.get("observacao_legal") or ""),
+            "uf_cbenef": uf_cbenef,
+            "cbenef_validos_uf": cbenef_lista,
+            "cbenef_sugerido": str(cbenef_lista[0]["codigo_cbenef"]) if cbenef_lista else "",
+        }
+
+    return {
+        "protocolo_encontrado": False,
+        "tem_protocolo_st": False,
+        "tem_st": False,
+        "cest_resolvido": cest,
+        "mva_original": ZERO,
+        "aliquota_interna_destino": aliq_modal_d,
+        "fcp_destino": fcp_padrao_d,
+        "modalidade_base_st": "MVA",
+        "pmpf_valor": ZERO,
+        "ato_legal_st": f"Sem protocolo/convênio bilateral vigente para {uf_o} -> {uf_d} na data informada.",
+        "observacao_st": "",
+        "uf_cbenef": uf_cbenef,
+        "cbenef_validos_uf": cbenef_lista,
+        "cbenef_sugerido": str(cbenef_lista[0]["codigo_cbenef"]) if cbenef_lista else "",
     }

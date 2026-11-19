@@ -561,3 +561,44 @@ CREATE TABLE IF NOT EXISTS naturezas_operacao_ids (
     id_natureza       INTEGER NOT NULL DEFAULT 0,
     atualizado_em     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS tabela_cbenef_uf (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    uf                  TEXT NOT NULL,
+    codigo_cbenef       TEXT NOT NULL,
+    descricao           TEXT NOT NULL,
+    cst_permitidos      TEXT NOT NULL,
+    dispositivo_legal   TEXT NOT NULL,
+    ncms_vinculados     TEXT NOT NULL DEFAULT '',
+    vigencia_inicio     TEXT NOT NULL,
+    vigencia_fim        TEXT,
+    fonte_url           TEXT NOT NULL,
+    hash_sha256         TEXT NOT NULL,
+    UNIQUE (uf, codigo_cbenef, vigencia_inicio)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cbenef_uf_busca
+    ON tabela_cbenef_uf (uf, codigo_cbenef, vigencia_inicio, vigencia_fim);
+
+CREATE TABLE IF NOT EXISTS matriz_protocolos_st (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uf_origem                   TEXT NOT NULL,
+    uf_destino                  TEXT NOT NULL,
+    cest                        TEXT NOT NULL DEFAULT '',
+    ncm_prefixo                 TEXT NOT NULL,
+    descricao_segmento          TEXT NOT NULL,
+    ato_legal                   TEXT NOT NULL,
+    possui_acordo_bilateral     INTEGER NOT NULL DEFAULT 1 CHECK (possui_acordo_bilateral IN (0, 1)),
+    mva_original                REAL NOT NULL DEFAULT 0.0,
+    aliquota_interna_destino    REAL NOT NULL DEFAULT 18.0,
+    fcp_destino                 REAL NOT NULL DEFAULT 0.0,
+    modalidade_base_st          TEXT NOT NULL DEFAULT 'MVA' CHECK (modalidade_base_st IN ('MVA', 'PMPF', 'PAUTA')),
+    pmpf_valor                  REAL,
+    vigencia_inicio             TEXT NOT NULL,
+    vigencia_fim                TEXT,
+    observacao_legal            TEXT NOT NULL DEFAULT '',
+    UNIQUE (uf_origem, uf_destino, cest, ncm_prefixo, vigencia_inicio)
+);
+
+CREATE INDEX IF NOT EXISTS idx_protocolos_st_busca
+    ON matriz_protocolos_st (uf_origem, uf_destino, ncm_prefixo, cest, vigencia_inicio, vigencia_fim);

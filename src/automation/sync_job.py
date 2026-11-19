@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from src.app.service import RevTributariaService, baixar_bytes_oficiais
+from src.database.schema_fase2 import garantir_carga_fase2
 from src.legislation.vigia import verificar_fontes
 
 
@@ -27,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
 
         acervo = service.garantir_acervo_oficial()
         print(f"[ACERVO] Documentos oficiais: {acervo}")
+
+        fase2 = garantir_carga_fase2(service._get_conn())
+        print(f"[FASE2] cBenef & Protocolos ST: {fase2}")
 
         fetcher = None if args.dry_run else baixar_bytes_oficiais
         resumo = service.sincronizar_bases_oficiais(

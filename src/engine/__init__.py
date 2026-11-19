@@ -18,6 +18,7 @@ from src.engine.fiscal_engine import (
     FINALIDADES_OPERACAO,
     ContextoOperacaoFiscal,
     avaliar_operacao_bidirecional,
+    resolver_parametros_estaduais,
 )
 from src.engine.fiscal_math import (
     FUNDO_NA_MVA,
@@ -74,5 +75,6 @@ __all__ = [
     "gerar_linhas_matriz_ncm",
     "gerar_matriz_ncm",
     "origem_por_fci",
+    "resolver_parametros_estaduais",
     "validar_matriz_ncms",
 ]

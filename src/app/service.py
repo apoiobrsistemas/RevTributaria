@@ -58,6 +58,7 @@ from src.engine import (
     executar_pipeline_skills,
     gerar_linhas_matriz_ncm,
     gerar_matriz_ncm,
+    resolver_parametros_estaduais,
     validar_matriz_ncms,
 )
 from src.engine.fiscal_math import aliquota_interestadual
@@ -2351,11 +2352,36 @@ class RevTributariaService:
         regra_fed = buscar_regra_federal(conn, ncm=ncm_limpo, data_referencia=ref)
 
         cst_uso = cst_ou_csosn.strip() or str((regra_est or {}).get("cst_icms") or "00")
+        params_est = resolver_parametros_estaduais(
+            conn,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_limpo,
+            cest=str((regra_est or {}).get("cest") or ""),
+            cst=cst_uso,
+            direcao=direcao,
+            data_operacao=ref,
+        )
+
         cbenef_uso = cbenef.strip() or str((regra_est or {}).get("codigo_beneficio_fiscal") or "")
-        mva_uso = Decimal(str(mva_original_pct if mva_original_pct is not None else ((regra_est or {}).get("margem_st") or 0)))
+        mva_uso = Decimal(
+            str(
+                mva_original_pct
+                if mva_original_pct is not None
+                else (params_est["mva_original"] if params_est["protocolo_encontrado"] else ((regra_est or {}).get("margem_st") or 0))
+            )
+        )
         red_uso = Decimal(str(reducao_bc_pct if reducao_bc_pct is not None else ((regra_est or {}).get("reducao_base_icms") or 0)))
-        st_uso = bool(tem_st if tem_st is not None else ((regra_est or {}).get("tem_st") or 0))
-        proto_uso = bool(tem_protocolo_st if tem_protocolo_st is not None else ((regra_est or {}).get("tem_acordo_st") or 0))
+        st_uso = bool(
+            tem_st
+            if tem_st is not None
+            else (params_est["tem_st"] or bool((regra_est or {}).get("tem_st") or 0))
+        )
+        proto_uso = bool(
+            tem_protocolo_st
+            if tem_protocolo_st is not None
+            else (params_est["tem_protocolo_st"] if params_est["protocolo_encontrado"] else bool((regra_est or {}).get("tem_acordo_st") or 0))
+        )
 
         ctx = ContextoOperacaoFiscal(
             direcao=direcao,
@@ -2370,17 +2396,48 @@ class RevTributariaService:
             operacao_com_contribuinte=operacao_com_contribuinte,
             cst_ou_csosn=cst_uso,
             cbenef=cbenef_uso,
-            cest=str((regra_est or {}).get("cest") or ""),
+            cest=str(params_est.get("cest_resolvido") or (regra_est or {}).get("cest") or ""),
+            aliquota_interna_destino=params_est["aliquota_interna_destino"] if params_est["protocolo_encontrado"] else None,
+            aliquota_fcp=params_est["fcp_destino"] if params_est["protocolo_encontrado"] else None,
             reducao_bc_pct=red_uso,
             tem_st=st_uso,
             tem_protocolo_st=proto_uso,
             st_retida_na_origem=st_retida_na_origem,
             mva_original_pct=mva_uso,
-            pmpf_unitario=Decimal(str(pmpf_unitario)),
+            pmpf_unitario=Decimal(str(pmpf_unitario or params_est.get("pmpf_valor") or 0)),
             fornecedor_simples_nacional=fornecedor_simples_nacional,
             aliquota_credito_sn_pct=Decimal(str(aliquota_credito_sn_pct)),
         )
-        return avaliar_operacao_bidirecional(ctx, regra_est=regra_est, regra_fed=regra_fed)
+        return avaliar_operacao_bidirecional(
+            ctx,
+            regra_est=regra_est,
+            regra_fed=regra_fed,
+            cbenef_validos=params_est["cbenef_validos_uf"],
+            ato_legal_st=params_est["ato_legal_st"],
+        )
+
+    def resolver_parametros_estaduais_ncm(
+        self,
+        *,
+        uf_origem: str,
+        uf_destino: str,
+        ncm: str,
+        cest: str = "",
+        cst: str = "00",
+        direcao: str = "SAIDA",
+        data_operacao: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve automaticamente Protocolo ST e códigos cBenef vigentes por UF/data."""
+        return resolver_parametros_estaduais(
+            self._get_conn(),
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            ncm=ncm,
+            cest=cest,
+            cst=cst,
+            direcao=direcao,
+            data_operacao=data_operacao,
+        )
 
     def restaurar_snapshot_cloud(self) -> dict[str, Any]:
         """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""
