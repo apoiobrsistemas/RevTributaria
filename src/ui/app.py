@@ -93,28 +93,9 @@ def _limpar_cache() -> None:
     st.cache_data.clear()
 
 
-_ROTINA_BG_STARTED: set[str] = set()
-
-
 def _iniciar_rotina_diaria_background(db_path: str) -> None:
-    """Dispara a rotina diária (.gov.br + Vigia) em background sem travar a abertura da tela."""
-    from datetime import date
-
-    chave = f"{db_path}|{date.today().isoformat()}"
-    if chave in _ROTINA_BG_STARTED:
-        return
-    _ROTINA_BG_STARTED.add(chave)
-
-    def _worker() -> None:
-        srv_bg = RevTributariaService(db_path)
-        try:
-            srv_bg.executar_rotina_diaria_ao_abrir(uf_origem="SP")
-        except Exception:
-            pass
-        finally:
-            srv_bg.close()
-
-    threading.Thread(target=_worker, daemon=True, name="revtributaria-rotina-diaria").start()
+    """Mantido por compatibilidade; sincronização oficial é disparada pelos botões da barra lateral sem lock concorrente."""
+    return None
 
 
 def _render_sidebar(db_path: str) -> tuple[str, str]:
