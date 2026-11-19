@@ -47,6 +47,13 @@ def _contar_regras_ativas(conn: sqlite3.Connection) -> int:
         return 0
 
 
+def _contar_fontes_legais(conn: sqlite3.Connection) -> int:
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM fontes_legais").fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
 def exportar_snapshot(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, int]:
     """Gera data/revtributaria_snapshot.db.gz com as regras/fontes/acervo (sem NF-es e dados de ERP)."""
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,20 +76,27 @@ def exportar_snapshot(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, int]:
             destino.execute("PRAGMA journal_mode = DELETE;")
             destino.execute("VACUUM;")
             regras = _contar_regras_ativas(destino)
+            fontes = _contar_fontes_legais(destino)
         finally:
             destino.close()
 
         with open(tmp_db, "rb") as f_in, gzip.open(SNAPSHOT_DB_GZ, "wb", compresslevel=9) as f_out:
             shutil.copyfileobj(f_in, f_out)
 
-    meta = {"regras_estaduais_ativas": regras}
+    meta = {"regras_estaduais_ativas": regras, "fontes_legais": fontes}
     SNAPSHOT_META.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
 
 
 def restaurar_snapshot_se_necessario(db_path: str | Path = DEFAULT_DB_PATH) -> dict[str, int | bool]:
-    """Restaura o snapshot versionado quando a base local tem menos regras ativas que o snapshot."""
-    resultado: dict[str, int | bool] = {"restaurado": False, "regras_antes": 0, "regras_snapshot": 0}
+    """Restaura o snapshot versionado quando a base local tem menos regras ativas ou fontes que o snapshot."""
+    resultado: dict[str, int | bool] = {
+        "restaurado": False,
+        "regras_antes": 0,
+        "regras_snapshot": 0,
+        "fontes_antes": 0,
+        "fontes_snapshot": 0,
+    }
     if str(db_path) == ":memory:" or not SNAPSHOT_DB_GZ.exists():
         return resultado
 
@@ -91,14 +105,18 @@ def restaurar_snapshot_se_necessario(db_path: str | Path = DEFAULT_DB_PATH) -> d
     except (OSError, ValueError):
         meta = {}
     regras_snapshot = int(meta.get("regras_estaduais_ativas") or 0)
+    fontes_snapshot = int(meta.get("fontes_legais") or 0)
     resultado["regras_snapshot"] = regras_snapshot
+    resultado["fontes_snapshot"] = fontes_snapshot
 
     with _SNAPSHOT_LOCK:
         conn = init_db(db_path)
         try:
             regras_atuais = _contar_regras_ativas(conn)
+            fontes_atuais = _contar_fontes_legais(conn)
             resultado["regras_antes"] = regras_atuais
-            if regras_atuais >= regras_snapshot:
+            resultado["fontes_antes"] = fontes_atuais
+            if regras_atuais >= regras_snapshot and fontes_atuais >= fontes_snapshot:
                 return resultado
 
             with tempfile.TemporaryDirectory() as tmp:
