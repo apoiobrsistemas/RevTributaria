@@ -536,31 +536,38 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             key="cm_mx_modo_exp",
         )
         if modo_exp_cfg.startswith("Matriz Completa"):
-            val_69 = validar_matriz_ncm_69(linhas)
-            if val_69["valido"]:
-                st.success(f"✅ Validador APROVADO: {val_69['total_linhas']} linha(s) e {len(COLUNAS_MATRIZ_NCM_69)} colunas completas (Regime Tributário -> Observações) com preenchimento padrão Linx.")
-            else:
-                for er in val_69["erros"]:
-                    st.error(f"🚫 {er}")
-            if val_69["valido"]:
-                c69_1, c69_2 = st.columns(2)
-                c69_1.download_button(
-                    "📥 Baixar Matriz Completa NCM (69 campos .xlsx)",
-                    data=exportar_matriz_ncm_69_xlsx(linhas),
-                    file_name=f"matriz_ncm_69_campos_{nome_export.rsplit('.', 1)[0]}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="cm_69_dl_xlsx",
-                    type="primary",
-                    use_container_width=True,
-                )
-                c69_2.download_button(
-                    "📥 Baixar Matriz Completa NCM (69 campos .csv)",
-                    data=exportar_matriz_ncm_69_csv(linhas),
-                    file_name=f"matriz_ncm_69_campos_{nome_export.rsplit('.', 1)[0]}.csv",
-                    mime="text/csv",
-                    key="cm_69_dl_csv",
-                    use_container_width=True,
-                )
+            if st.button("⚙️ Validar e Gerar Matriz Completa (69 Campos .xlsx / .csv)", key="cm_prep_69_exp", type="primary"):
+                val_69 = validar_matriz_ncm_69(linhas)
+                st.session_state["cm_69_val"] = val_69
+                if val_69["valido"]:
+                    st.session_state["cm_69_xlsx_bytes"] = exportar_matriz_ncm_69_xlsx(linhas)
+                    st.session_state["cm_69_csv_bytes"] = exportar_matriz_ncm_69_csv(linhas)
+                    st.session_state["cm_69_nome_base"] = nome_export.rsplit(".", 1)[0]
+            val_69 = st.session_state.get("cm_69_val")
+            if val_69:
+                if val_69["valido"] and st.session_state.get("cm_69_nome_base") == nome_export.rsplit(".", 1)[0]:
+                    st.success(f"✅ Validador APROVADO: {val_69['total_linhas']} linha(s) e {len(COLUNAS_MATRIZ_NCM_69)} colunas completas (Regime Tributário -> Observações) com preenchimento padrão Linx.")
+                    c69_1, c69_2 = st.columns(2)
+                    c69_1.download_button(
+                        "📥 Baixar Matriz Completa NCM (69 campos .xlsx)",
+                        data=st.session_state["cm_69_xlsx_bytes"],
+                        file_name=f"matriz_ncm_69_campos_{nome_export.rsplit('.', 1)[0]}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="cm_69_dl_xlsx",
+                        type="primary",
+                        use_container_width=True,
+                    )
+                    c69_2.download_button(
+                        "📥 Baixar Matriz Completa NCM (69 campos .csv)",
+                        data=st.session_state["cm_69_csv_bytes"],
+                        file_name=f"matriz_ncm_69_campos_{nome_export.rsplit('.', 1)[0]}.csv",
+                        mime="text/csv",
+                        key="cm_69_dl_csv",
+                        use_container_width=True,
+                    )
+                elif not val_69["valido"]:
+                    for er in val_69["erros"]:
+                        st.error(f"🚫 {er}")
         else:
             mx1, mx2, mx3, mx4, mx5 = st.columns([1.1, 0.9, 0.9, 1.1, 1.2])
             mx_ids = mx1.text_input("ID Config (ex: 1 ou 1,2,3,4,5)", value="1", key="cm_mx_ids")
@@ -689,24 +696,30 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         txt_bytes = "\n".join(linhas_txt).encode("utf-8")
 
         st.markdown("#### 📤 Exportar Resultado")
-        r69_1, r69_2 = st.columns(2)
-        r69_1.download_button(
-            "📥 Baixar Matriz Completa — Todos os 69 Campos (.xlsx)",
-            data=exportar_matriz_ncm_69_xlsx(filtradas),
-            file_name=f"matriz_completa_69_campos_{nome_base}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="cm_dl_69_filtradas_xlsx",
-            type="primary",
-            use_container_width=True,
-        )
-        r69_2.download_button(
-            "📥 Baixar Matriz Completa — Todos os 69 Campos (.csv)",
-            data=exportar_matriz_ncm_69_csv(filtradas),
-            file_name=f"matriz_completa_69_campos_{nome_base}.csv",
-            mime="text/csv",
-            key="cm_dl_69_filtradas_csv",
-            use_container_width=True,
-        )
+        if st.button("⚙️ Gerar Matriz Completa — Todos os 69 Campos (.xlsx / .csv)", key="cm_prep_69_filtradas", type="primary"):
+            with st.spinner("Gerando planilha completa com 69 campos..."):
+                st.session_state["cm_69_filt_xlsx"] = exportar_matriz_ncm_69_xlsx(filtradas)
+                st.session_state["cm_69_filt_csv"] = exportar_matriz_ncm_69_csv(filtradas)
+                st.session_state["cm_69_filt_nome"] = nome_base
+        if st.session_state.get("cm_69_filt_xlsx") and st.session_state.get("cm_69_filt_nome") == nome_base:
+            r69_1, r69_2 = st.columns(2)
+            r69_1.download_button(
+                "📥 Baixar Matriz Completa — Todos os 69 Campos (.xlsx)",
+                data=st.session_state["cm_69_filt_xlsx"],
+                file_name=f"matriz_completa_69_campos_{nome_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_69_filtradas_xlsx",
+                type="primary",
+                use_container_width=True,
+            )
+            r69_2.download_button(
+                "📥 Baixar Matriz Completa — Todos os 69 Campos (.csv)",
+                data=st.session_state["cm_69_filt_csv"],
+                file_name=f"matriz_completa_69_campos_{nome_base}.csv",
+                mime="text/csv",
+                key="cm_dl_69_filtradas_csv",
+                use_container_width=True,
+            )
         lx1, lx2, lx3 = st.columns([1.0, 1.4, 1.4])
         id_cfg_ini = int(
             lx1.number_input(

@@ -291,46 +291,53 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_op, tab1, tab2, tab3, tab4, tab5, tab6, tab_acervo = st.tabs(
-        [
-            "🔎 Consulta Matriz por NCM (CFOPs & Impostos)",
-            "📋 Matriz Legal (NCMs)",
-            "🧮 Simulador (11 Blocos)",
-            "📄 Auditor XML NF-e",
-            "⚙️ Comparativo ERP",
-            "🛡️ Vigia & Fontes",
-            "✅ Validador NCMs & Skills",
-            "📚 Acervo Técnico & NTs",
-        ]
+    menu_opcoes = [
+        "🔎 Consulta Matriz por NCM (CFOPs & Impostos)",
+        "📋 Matriz Legal (NCMs)",
+        "🧮 Simulador (11 Blocos)",
+        "📄 Auditor XML NF-e",
+        "⚙️ Comparativo ERP",
+        "🛡️ Vigia & Fontes",
+        "✅ Validador NCMs & Skills",
+        "📚 Acervo Técnico & NTs",
+    ]
+    menu_ativo = st.radio(
+        "Navegação Principal",
+        menu_opcoes,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="rev_menu_principal",
     )
-    with tab_op:
+    st.markdown("<hr style='margin:0.35rem 0 0.85rem 0;border:none;border-top:1px solid #E2E8F0;'/>", unsafe_allow_html=True)
+
+    if menu_ativo == menu_opcoes[0]:
         render_consulta_matriz_ncm(db_path=db_path)
-    with tab1:
+    elif menu_ativo == menu_opcoes[1]:
         render_aba_matriz(
             db_path=db_path,
             usuario=usuario,
             carregar_regras=_carregar_regras,
             limpar_cache=_limpar_cache,
         )
-    with tab2:
+    elif menu_ativo == menu_opcoes[2]:
         render_aba_simulador(db_path=db_path)
-    with tab3:
+    elif menu_ativo == menu_opcoes[3]:
         render_aba_auditor_xml(
             db_path=db_path,
             carregar_nfes=_carregar_nfes,
             limpar_cache=_limpar_cache,
         )
-    with tab4:
+    elif menu_ativo == menu_opcoes[4]:
         render_aba_comparativo_erp(db_path=db_path, limpar_cache=_limpar_cache)
-    with tab5:
+    elif menu_ativo == menu_opcoes[5]:
         render_aba_vigia(
             db_path=db_path,
             carregar_fontes=_carregar_fontes,
             limpar_cache=_limpar_cache,
         )
-    with tab6:
+    elif menu_ativo == menu_opcoes[6]:
         render_aba_validador(db_path=db_path, limpar_cache=_limpar_cache)
-    with tab_acervo:
+    elif menu_ativo == menu_opcoes[7]:
         srv_ac = RevTributariaService(db_path)
         try:
             render_tab_acervo(srv_ac)
