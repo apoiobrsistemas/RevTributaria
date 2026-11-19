@@ -11,6 +11,7 @@ from src.engine.auditor import (
     dentro_tolerancia_percentual,
     dentro_tolerancia_valor,
 )
+from src.engine.cclasstrib_catalog import TABELA_CCLASSTRIB, consultar_enquadramento_cclasstrib
 from src.engine.fiscal_engine import (
     ALIQUOTAS_INTERNAS_UF,
     DESCRICOES_CST_CSOSN,
@@ -34,6 +35,11 @@ from src.engine.fiscal_math import (
 from src.engine.matrix_generator import gerar_matriz_ncm
 from src.engine.matriz_operacoes import gerar_linhas_matriz_ncm
 from src.engine.ncm_validator import AchadoValidacaoNCM, validar_matriz_ncms
+from src.engine.reforma_tributaria_engine import (
+    CRONOGRAMA_TRANSICAO_LC214,
+    ContextoReformaLC214,
+    calcular_transicao_lc214,
+)
 from src.engine.skills_pipeline import executar_pipeline_skills
 from src.engine.sp_decision_tree import (
     CASOS_CRITICOS_SP,
@@ -41,6 +47,7 @@ from src.engine.sp_decision_tree import (
     TRAVA_CST_CBENEF_SRE_70_2025,
     avaliar_arvore_5_camadas,
 )
+from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
 
 __all__ = [
     "ALIQUOTAS_INTERNAS_UF",
@@ -76,5 +83,11 @@ __all__ = [
     "gerar_matriz_ncm",
     "origem_por_fci",
     "resolver_parametros_estaduais",
+    "TABELA_CCLASSTRIB",
+    "CRONOGRAMA_TRANSICAO_LC214",
+    "ContextoReformaLC214",
+    "calcular_transicao_lc214",
+    "consultar_enquadramento_cclasstrib",
+    "validar_xml_reforma_lc214",
     "validar_matriz_ncms",
 ]

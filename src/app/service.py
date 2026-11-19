@@ -48,6 +48,7 @@ from src.database.snapshot import restaurar_snapshot_se_necessario
 from src.engine import (
     CASOS_CRITICOS_SP,
     ContextoOperacaoFiscal,
+    ContextoReformaLC214,
     ItemCalculo,
     REVOGACOES_ST_SP,
     auditar_config_erp,
@@ -55,11 +56,13 @@ from src.engine import (
     avaliar_arvore_5_camadas,
     avaliar_operacao_bidirecional,
     calcular_item,
+    calcular_transicao_lc214,
     executar_pipeline_skills,
     gerar_linhas_matriz_ncm,
     gerar_matriz_ncm,
     resolver_parametros_estaduais,
     validar_matriz_ncms,
+    validar_xml_reforma_lc214,
 )
 from src.engine.fiscal_math import aliquota_interestadual
 from src.engine.matrix_generator import ALIQUOTA_FCP_PADRAO_UF, ALIQUOTA_INTERNA_MODAL_UF
@@ -2438,6 +2441,48 @@ class RevTributariaService:
             direcao=direcao,
             data_operacao=data_operacao,
         )
+
+    def simular_reforma_lc214(
+        self,
+        *,
+        ano_calendario: int,
+        ncm: str,
+        valor_operacao_bruto: Decimal | float | str,
+        direcao: str = "SAIDA",
+        icms_atual: Decimal | float | str = Decimal("0"),
+        pis_atual: Decimal | float | str = Decimal("0"),
+        cofins_atual: Decimal | float | str = Decimal("0"),
+        ipi_atual: Decimal | float | str = Decimal("0"),
+        iss_atual: Decimal | float | str = Decimal("0"),
+        concorrente_zfm: bool = False,
+        fornecedor_simples_nacional: bool = False,
+        simples_regime_hibrido: bool = False,
+        split_payment_liquidado: bool = True,
+        xml_contem_gibscbs: bool = True,
+    ) -> dict[str, Any]:
+        """Simula a transição dual (Sistema Atual x Reforma LC 214/2025) de 2026 a 2033+."""
+        ctx = ContextoReformaLC214(
+            ano_calendario=ano_calendario,
+            ncm=ncm,
+            valor_operacao_bruto=Decimal(str(valor_operacao_bruto)),
+            direcao=direcao,
+            icms_atual=Decimal(str(icms_atual)),
+            pis_atual=Decimal(str(pis_atual)),
+            cofins_atual=Decimal(str(cofins_atual)),
+            ipi_atual=Decimal(str(ipi_atual)),
+            iss_atual=Decimal(str(iss_atual)),
+            concorrente_zfm=concorrente_zfm,
+            fornecedor_simples_nacional=fornecedor_simples_nacional,
+            simples_regime_hibrido=simples_regime_hibrido,
+            split_payment_liquidado=split_payment_liquidado,
+            xml_contem_gibscbs=xml_contem_gibscbs,
+        )
+        return calcular_transicao_lc214(ctx)
+
+    @staticmethod
+    def validar_xml_reforma(xml_str: str) -> dict[str, Any]:
+        """Valida grupos XML gIBSCBS e gIS conforme NT SVRS e Art. 12 § 2º da LC 214/2025."""
+        return validar_xml_reforma_lc214(xml_str)
 
     def restaurar_snapshot_cloud(self) -> dict[str, Any]:
         """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""

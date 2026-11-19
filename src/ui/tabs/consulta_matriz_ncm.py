@@ -21,6 +21,11 @@ from src.engine.fiscal_engine import (
     avaliar_operacao_bidirecional,
     resolver_parametros_estaduais,
 )
+from src.engine.reforma_tributaria_engine import (
+    ContextoReformaLC214,
+    calcular_transicao_lc214,
+)
+from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
 from src.ui.design_system import formatar_ncm_mascara
 
 UFS_BR = [
@@ -356,6 +361,83 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             st.markdown("**Base Legal Específica**")
             for b in res_dir["bases_legais"]:
                 st.markdown(f"- {b}")
+
+    with st.expander("🏛️ Reforma Tributária (LC 214/2025 — IBS / CBS / IS & Validador XML gIBSCBS)", expanded=False):
+        r1, r2, r3, r4 = st.columns([1.0, 1.2, 1.2, 1.0])
+        ano_ref = r1.selectbox("Ano de Competência", list(range(2026, 2034)), index=0, key="cm_ref_ano")
+        vlr_bruto_ref = r2.number_input("Valor Operação Bruto (R$)", min_value=0.0, value=1000.0, step=100.0, key="cm_ref_vlr")
+        dir_ref = r3.selectbox("Direção (Reforma)", ["SAIDA", "ENTRADA"], key="cm_ref_dir")
+        split_ok = r4.checkbox("Split Payment Liquidado?", value=True, key="cm_ref_split")
+
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        icms_at = rc1.number_input("ICMS Atual (R$)", min_value=0.0, value=180.0, step=10.0, key="cm_ref_icms")
+        pis_at = rc2.number_input("PIS Atual (R$)", min_value=0.0, value=16.5, step=1.0, key="cm_ref_pis")
+        cof_at = rc3.number_input("COFINS Atual (R$)", min_value=0.0, value=76.0, step=1.0, key="cm_ref_cof")
+        ipi_at = rc4.number_input("IPI Atual (R$)", min_value=0.0, value=0.0, step=5.0, key="cm_ref_ipi")
+
+        ncm_ref = str(linhas[0].get("NCM") if linhas else "85071090")
+        res_ref = calcular_transicao_lc214(
+            ContextoReformaLC214(
+                ano_calendario=int(ano_ref),
+                ncm=ncm_ref,
+                valor_operacao_bruto=Decimal(str(vlr_bruto_ref)),
+                direcao=dir_ref,
+                icms_atual=Decimal(str(icms_at)),
+                pis_atual=Decimal(str(pis_at)),
+                cofins_atual=Decimal(str(cof_at)),
+                ipi_atual=Decimal(str(ipi_at)),
+                split_payment_liquidado=split_ok,
+            )
+        )
+
+        st.info(
+            f"**{res_ref['fase_transicao']}** | CST IBS/CBS: `{res_ref['cst_ibs_cbs']}` | "
+            f"cClassTrib: `{res_ref['cclass_trib']}` | Redução: `{res_ref['reducao_aliquota_pct']}%` "
+            f"({res_ref['anexo_legal']} — {res_ref['artigo_legal']})"
+        )
+        for al_r in res_ref["alertas_reforma"]:
+            st.warning(f"⚠️ {al_r}")
+
+        comp_dual = [
+            {
+                "Sistema": "Sistema Atual (Integral)",
+                "Base": f"R$ {vlr_bruto_ref:.2f}",
+                "ICMS / ISS": f"R$ {icms_at:.2f}",
+                "PIS / COFINS": f"R$ {pis_at + cof_at:.2f}",
+                "IPI": f"R$ {ipi_at:.2f}",
+                "CBS / IBS / IS": "R$ 0.00",
+                "Compensação 2026": "R$ 0.00",
+                "Carga Líquida Total": f"R$ {res_ref['carga_sistema_atual']}",
+            },
+            {
+                "Sistema": f"Transição LC 214/2025 ({ano_ref})",
+                "Base": f"R$ {res_ref['base_limpa_por_fora']} (por fora)",
+                "ICMS / ISS": f"R$ {res_ref['icms_residual']}",
+                "PIS / COFINS": f"R$ {Decimal(res_ref['pis_residual']) + Decimal(res_ref['cofins_residual'])}",
+                "IPI": f"R$ {res_ref['ipi_residual']}",
+                "CBS / IBS / IS": f"CBS {res_ref['valor_cbs']} | IBS {res_ref['valor_ibs_total']} | IS {res_ref['valor_is']}",
+                "Compensação 2026": f"-R$ {res_ref['compensacao_2026']}",
+                "Carga Líquida Total": f"R$ {res_ref['carga_liquida_transicao']}",
+            },
+        ]
+        st.dataframe(comp_dual, use_container_width=True, hide_index=True)
+
+        if dir_ref == "ENTRADA":
+            st.caption(f"💳 **Crédito Financeiro Entrada:** {res_ref['regra_credito_reforma']}")
+
+        xml_trecho = st.text_area(
+            "Validador Rápido XML (gIBSCBS / gIS — Cole um trecho <det> ou <IBSCBS>)",
+            value="",
+            height=100,
+            key="cm_ref_xml_txt",
+        )
+        if xml_trecho.strip():
+            v_xml = validar_xml_reforma_lc214(xml_trecho)
+            if v_xml["valido"]:
+                st.success(f"✅ XML válido ({v_xml['itens_auditados']} item(ns) auditado(s)).")
+            else:
+                for err in v_xml["erros"]:
+                    st.error(f"🚫 {err}")
 
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)
