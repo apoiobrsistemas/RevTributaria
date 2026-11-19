@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import csv
-import importlib
 import io
 from datetime import date
 
 import streamlit as st
 
 from src.app.service import RevTributariaService
+from src.database.connection import init_db
+from src.database.naturezas import (
+    aplicar_ids_natureza_nas_linhas,
+    listar_ids_naturezas_operacao_db,
+    salvar_ids_naturezas_operacao_db,
+)
 from src.ui.design_system import formatar_ncm_mascara
 
 UFS_BR = [
@@ -177,18 +182,11 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     )
 
     # Mapeamento configurável de IDs por Natureza de Operação (persistido no banco)
-    srv_cls = RevTributariaService
-    if not hasattr(srv_cls, "listar_ids_naturezas_operacao"):
-        import src.app.service as _srv_mod
-
-        importlib.reload(_srv_mod)
-        srv_cls = _srv_mod.RevTributariaService
-
-    srv_nat = srv_cls(db_path)
+    _conn_nat = init_db(db_path)
     try:
-        ids_salvos = srv_nat.listar_ids_naturezas_operacao()
+        ids_salvos = listar_ids_naturezas_operacao_db(_conn_nat)
     finally:
-        srv_nat.close()
+        _conn_nat.close()
 
     # Garante que todas as naturezas presentes na consulta apareçam na lista (1x cada)
     naturezas_ordem = list(ids_salvos.keys())
@@ -228,14 +226,14 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             )
 
         if novos_ids != ids_salvos:
-            srv_save = srv_cls(db_path)
+            _conn_save = init_db(db_path)
             try:
-                ids_salvos = srv_save.salvar_ids_naturezas_operacao(novos_ids)
+                ids_salvos = salvar_ids_naturezas_operacao_db(_conn_save, novos_ids)
             finally:
-                srv_save.close()
+                _conn_save.close()
             st.toast("IDs das Naturezas salvos automaticamente.", icon="✅")
 
-    linhas = srv_cls.aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
+    linhas = aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
 
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)
