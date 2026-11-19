@@ -47,11 +47,13 @@ from src.database.naturezas import (
 from src.database.snapshot import restaurar_snapshot_se_necessario
 from src.engine import (
     CASOS_CRITICOS_SP,
+    ContextoOperacaoFiscal,
     ItemCalculo,
     REVOGACOES_ST_SP,
     auditar_config_erp,
     auditar_nfe_contra_lei,
     avaliar_arvore_5_camadas,
+    avaliar_operacao_bidirecional,
     calcular_item,
     executar_pipeline_skills,
     gerar_linhas_matriz_ncm,
@@ -2295,6 +2297,90 @@ class RevTributariaService:
         qtd = indexar_nts_portal_nfe(conn, html, url_oficial=url_oficial)
         conn.commit()
         return qtd
+
+    def simular_operacao_bidirecional(
+        self,
+        *,
+        direcao: str,
+        finalidade: str,
+        uf_origem: str,
+        uf_destino: str,
+        ncm: str,
+        valor_produto: Decimal | float | str,
+        quantidade: Decimal | float | str = Decimal("1"),
+        valor_ipi: Decimal | float | str = Decimal("0"),
+        origem_mercadoria: str = "0",
+        operacao_com_contribuinte: bool = True,
+        cst_ou_csosn: str = "",
+        cbenef: str = "",
+        mva_original_pct: Decimal | float | str | None = None,
+        reducao_bc_pct: Decimal | float | str | None = None,
+        tem_st: bool | None = None,
+        tem_protocolo_st: bool | None = None,
+        st_retida_na_origem: bool = False,
+        fornecedor_simples_nacional: bool = False,
+        aliquota_credito_sn_pct: Decimal | float | str = Decimal("0"),
+        pmpf_unitario: Decimal | float | str = Decimal("0"),
+        data_referencia: str | None = None,
+    ) -> dict[str, Any]:
+        """Executa o roteador fiscal bidirecional (Saída vs Entrada Inversa) usando regras do banco."""
+        conn = self._get_conn()
+        ref = data_referencia or date.today().isoformat()
+        ncm_limpo = re.sub(r"\D", "", str(ncm or ""))
+        uf_o = uf_origem.strip().upper()
+        uf_d = uf_destino.strip().upper()
+        uf_regra = uf_d if direcao.strip().upper() == "ENTRADA" else uf_o
+
+        regra_est = buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_regra,
+            uf_destino=uf_d,
+            ncm=ncm_limpo,
+            operacao_com_contribuinte=operacao_com_contribuinte,
+            origem_mercadoria=origem_mercadoria,
+            data_referencia=ref,
+        ) or buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_regra,
+            uf_destino=uf_regra,
+            ncm=ncm_limpo,
+            operacao_com_contribuinte=operacao_com_contribuinte,
+            origem_mercadoria=origem_mercadoria,
+            data_referencia=ref,
+        )
+        regra_fed = buscar_regra_federal(conn, ncm=ncm_limpo, data_referencia=ref)
+
+        cst_uso = cst_ou_csosn.strip() or str((regra_est or {}).get("cst_icms") or "00")
+        cbenef_uso = cbenef.strip() or str((regra_est or {}).get("codigo_beneficio_fiscal") or "")
+        mva_uso = Decimal(str(mva_original_pct if mva_original_pct is not None else ((regra_est or {}).get("margem_st") or 0)))
+        red_uso = Decimal(str(reducao_bc_pct if reducao_bc_pct is not None else ((regra_est or {}).get("reducao_base_icms") or 0)))
+        st_uso = bool(tem_st if tem_st is not None else ((regra_est or {}).get("tem_st") or 0))
+        proto_uso = bool(tem_protocolo_st if tem_protocolo_st is not None else ((regra_est or {}).get("tem_acordo_st") or 0))
+
+        ctx = ContextoOperacaoFiscal(
+            direcao=direcao,
+            finalidade=finalidade,
+            uf_origem=uf_o,
+            uf_destino=uf_d,
+            ncm=ncm_limpo,
+            valor_produto=Decimal(str(valor_produto)),
+            quantidade=Decimal(str(quantidade)),
+            valor_ipi=Decimal(str(valor_ipi)),
+            origem_mercadoria=origem_mercadoria,
+            operacao_com_contribuinte=operacao_com_contribuinte,
+            cst_ou_csosn=cst_uso,
+            cbenef=cbenef_uso,
+            cest=str((regra_est or {}).get("cest") or ""),
+            reducao_bc_pct=red_uso,
+            tem_st=st_uso,
+            tem_protocolo_st=proto_uso,
+            st_retida_na_origem=st_retida_na_origem,
+            mva_original_pct=mva_uso,
+            pmpf_unitario=Decimal(str(pmpf_unitario)),
+            fornecedor_simples_nacional=fornecedor_simples_nacional,
+            aliquota_credito_sn_pct=Decimal(str(aliquota_credito_sn_pct)),
+        )
+        return avaliar_operacao_bidirecional(ctx, regra_est=regra_est, regra_fed=regra_fed)
 
     def restaurar_snapshot_cloud(self) -> dict[str, Any]:
         """Restaura o snapshot versionado (10.580+ regras) se a base local estiver incompleta."""

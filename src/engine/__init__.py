@@ -11,6 +11,14 @@ from src.engine.auditor import (
     dentro_tolerancia_percentual,
     dentro_tolerancia_valor,
 )
+from src.engine.fiscal_engine import (
+    ALIQUOTAS_INTERNAS_UF,
+    DESCRICOES_CST_CSOSN,
+    DIRECOES_OPERACAO,
+    FINALIDADES_OPERACAO,
+    ContextoOperacaoFiscal,
+    avaliar_operacao_bidirecional,
+)
 from src.engine.fiscal_math import (
     FUNDO_NA_MVA,
     ItemCalculo,
@@ -34,9 +42,14 @@ from src.engine.sp_decision_tree import (
 )
 
 __all__ = [
+    "ALIQUOTAS_INTERNAS_UF",
     "AchadoValidacaoNCM",
     "CASOS_CRITICOS_SP",
+    "ContextoOperacaoFiscal",
+    "DESCRICOES_CST_CSOSN",
+    "DIRECOES_OPERACAO",
     "Divergencia",
+    "FINALIDADES_OPERACAO",
     "FUNDO_NA_MVA",
     "ItemCalculo",
     "REVOGACOES_ST_SP",
@@ -50,6 +63,7 @@ __all__ = [
     "auditar_config_erp",
     "auditar_nfe_contra_lei",
     "avaliar_arvore_5_camadas",
+    "avaliar_operacao_bidirecional",
     "calcular_item",
     "calcular_mva_ajustado",
     "calcular_reducao_por_carga",

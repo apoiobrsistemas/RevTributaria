@@ -377,6 +377,73 @@ MAPA_8_PORTAIS_SP: list[dict[str, str]] = [
     },
 ]
 
+_SEFAZ_26_UFS: tuple[tuple[str, str, str], ...] = (
+    ("AC", "SEFAZ-AC — RICMS/AC & Tabelas ST", "https://sefaznet.ac.gov.br/legislacao/"),
+    ("AL", "SEFAZ-AL — RICMS/AL & Antecipação Tributária", "https://www.sefaz.al.gov.br/legislacao"),
+    ("AM", "SEFAZ-AM — RICMS/AM & Substituição Tributária", "https://www.sefaz.am.gov.br/legislacao/"),
+    ("AP", "SEFAZ-AP — RICMS/AP & Legislação Tributária", "https://www.sefaz.ap.gov.br/legislacao/"),
+    ("BA", "SEFAZ-BA — RICMS/BA, Anexo 1 ST & Antecipação", "https://www.sefaz.ba.gov.br/legislacao/"),
+    ("CE", "SEFAZ-CE — RICMS/CE & Carga Líquida ST", "https://www.sefaz.ce.gov.br/legislacao/"),
+    ("DF", "SEEC-DF — RICMS/DF & Tabela cBenef DF", "https://www.receita.fazenda.df.gov.br/legislacao"),
+    ("ES", "SEFAZ-ES — RICMS/ES & Anexos ST/Benefícios", "https://internet.sefaz.es.gov.br/legislacao/"),
+    ("GO", "ECONOMIA-GO — RCTE/GO, Anexo VIII ST & cBenef", "https://www.economia.go.gov.br/legislacao-tributaria"),
+    ("MA", "SEFAZ-MA — RICMS/MA & Anexo 4.13 ST", "https://sistemas1.sefaz.ma.gov.br/portalsefaz/legislacao"),
+    ("MG", "SEF-MG — RICMS/MG (Dec. 48.589/2023) & Anexo XV ST", "https://www.fazenda.mg.gov.br/empresas/legislacao_tributaria/"),
+    ("MS", "SEFAZ-MS — RICMS/MS & Anexo III ST", "https://www.sefaz.ms.gov.br/legislacao/"),
+    ("MT", "SEFAZ-MT — RICMS/MT & Estimativa Simplificada", "https://www.sefaz.mt.gov.br/portal/legislacao/"),
+    ("PA", "SEFA-PA — RICMS/PA & Anexo XIII ST", "https://www.sefa.pa.gov.br/legislacao/"),
+    ("PB", "SEFAZ-PB — RICMS/PB & Anexos ST/cBenef", "https://www.sefaz.pb.gov.br/legislacao"),
+    ("PE", "SEFAZ-PE — RICMS/PE & Decretos ST", "https://www.sefaz.pe.gov.br/Legislacao"),
+    ("PI", "SEFAZ-PI — RICMS/PI & Anexo V-A ST", "https://portal.sefaz.pi.gov.br/legislacao/"),
+    ("PR", "SEFA-PR — RICMS/PR, Anexo IX ST & Tabela cBenef", "https://www.fazenda.pr.gov.br/Pagina/Legislacao-Tributaria"),
+    ("RJ", "SEFAZ-RJ — RICMS/RJ, FECP & Tabela cBenef RJ", "https://www.fazenda.rj.gov.br/sefaz/faces/oracle/webcenter/portalapp/pages/navigation-renderer.jspx"),
+    ("RN", "SET-RN — RICMS/RN & Anexos ST", "https://www.set.rn.gov.br/legislacao"),
+    ("RO", "SEFIN-RO — RICMS/RO & Anexo VI ST", "https://www.sefin.ro.gov.br/legislacao"),
+    ("RR", "SEFAZ-RR — RICMS/RR & Legislação Tributária", "https://www.sefaz.rr.gov.br/legislacao"),
+    ("RS", "SEFAZ-RS — RICMS/RS, Apêndice II ST & Tabela cBenef RS", "https://www.sefaz.rs.gov.br/legislacao/"),
+    ("SC", "SEF-SC — RICMS/SC, Anexo 3 ST & Tabela cBenef SC", "https://legislacao.sef.sc.gov.br/"),
+    ("SE", "SEFAZ-SE — RICMS/SE & Substituição Tributária", "https://www.sefaz.se.gov.br/legislacao"),
+    ("TO", "SEFAZ-TO — RICMS/TO & Anexos ST", "https://www.sefaz.to.gov.br/legislacao/"),
+)
+
+CATALOGO_FONTES_OFICIAIS.extend(
+    [
+        {
+            "uf": uf,
+            "esfera": "ESTADUAL",
+            "tipo_norma": "RICMS_SEFAZ",
+            "numero_norma": f"RICMS-{uf}",
+            "titulo": titulo,
+            "url_oficial": url,
+            "cobertura": f"RICMS/{uf}, Anexos de Isenção/RBC, MVA/IVA-ST, PMPF e cBenef {uf}",
+        }
+        for uf, titulo, url in _SEFAZ_26_UFS
+    ]
+)
+
+CATALOGO_FONTES_OFICIAIS.extend(
+    [
+        {
+            "uf": "BR",
+            "esfera": "FEDERAL",
+            "tipo_norma": "LEI_COMPLEMENTAR",
+            "numero_norma": "LC 123/2006",
+            "titulo": "Planalto — Lei Complementar 123/2006 (Simples Nacional & Art. 23 Crédito)",
+            "url_oficial": "https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp123.htm",
+            "cobertura": "CSOSN 101-900, permissão de crédito Art. 23 e vedação de ajuste MVA",
+        },
+        {
+            "uf": "BR",
+            "esfera": "FEDERAL",
+            "tipo_norma": "AJUSTE_SINIEF",
+            "numero_norma": "Ajuste SINIEF 07/2005",
+            "titulo": "CONFAZ — Ajuste SINIEF 07/2005 (NF-e, CST, CSOSN e Rejeições)",
+            "url_oficial": "https://www.confaz.fazenda.gov.br/legislacao/ajustes/2005/AJ007_05",
+            "cobertura": "Estrutura nacional da NF-e, CST/CSOSN, CFOP e regras de validação",
+        },
+    ]
+)
+
 
 def garantir_fontes_oficiais(conn: sqlite3.Connection) -> dict[str, int]:
     """Insere ou atualiza de forma idempotente todas as fontes oficiais mapeadas."""

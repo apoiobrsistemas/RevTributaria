@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 from datetime import date
+from decimal import Decimal
 
 import streamlit as st
 
@@ -14,6 +15,10 @@ from src.database.naturezas import (
     aplicar_ids_natureza_nas_linhas,
     listar_ids_naturezas_operacao_db,
     salvar_ids_naturezas_operacao_db,
+)
+from src.engine.fiscal_engine import (
+    ContextoOperacaoFiscal,
+    avaliar_operacao_bidirecional,
 )
 from src.ui.design_system import formatar_ncm_mascara
 
@@ -234,6 +239,78 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             st.toast("IDs das Naturezas salvos automaticamente.", icon="✅")
 
     linhas = aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
+
+    with st.expander("⚖️ Auditoria Direcional (Saída vs Entrada Inversa), Memória de Cálculo & Semáforo de Risco", expanded=False):
+        d1, d2, d3, d4 = st.columns([1.4, 1.4, 1.0, 1.0])
+        dir_sel = d1.selectbox(
+            "Direção da Operação",
+            ["SAIDA", "ENTRADA"],
+            format_func=lambda x: "SAÍDA — Nossa Empresa = Emissor" if x == "SAIDA" else "ENTRADA — Nossa Empresa = Recebedor / Compra",
+            key="cm_dir_op",
+        )
+        fin_sel = d2.selectbox(
+            "Finalidade da Operação",
+            ["COMERCIALIZACAO", "INDUSTRIALIZACAO", "USO_CONSUMO", "ATIVO_IMOBILIZADO", "DEVOLUCAO"],
+            key="cm_fin_op",
+        )
+        uf_dest_dir = d3.selectbox("UF Destino (Recebedor)", UFS_BR, index=UFS_BR.index("SP"), key="cm_dir_uf_d")
+        cst_dir = d4.selectbox(
+            "CST / CSOSN",
+            ["00", "10", "20", "30", "40", "41", "50", "51", "60", "70", "90", "101", "102", "201", "202", "500"],
+            key="cm_dir_cst",
+        )
+
+        p1, p2, p3, p4 = st.columns([1.1, 1.0, 1.0, 1.2])
+        vlr_dir = p1.number_input("Valor Produto (R$)", min_value=0.0, value=1000.0, step=100.0, key="cm_dir_vlr")
+        mva_dir = p2.number_input("MVA Original (%)", min_value=0.0, value=0.0, step=1.0, key="cm_dir_mva")
+        red_dir = p3.number_input("Redução BC (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0, key="cm_dir_red")
+        cbenef_dir = p4.text_input("cBenef (se aplicável)", value="", key="cm_dir_cbenef")
+
+        t1, t2, t3, t4 = st.columns(4)
+        sn_forn = t1.checkbox("Fornecedor Simples Nacional", value=False, key="cm_dir_sn")
+        tem_st_dir = t2.checkbox("Item sujeito à ST", value=cst_dir in {"10", "30", "70", "201", "202"}, key="cm_dir_st")
+        proto_dir = t3.checkbox("Possui Protocolo/Convênio ST", value=False, key="cm_dir_proto")
+        retido_dir = t4.checkbox("ST já retida na origem", value=False, key="cm_dir_ret")
+
+        ncm_ctx = str(filtradas_ncm := (linhas[0].get("NCM") if linhas else "85071090"))
+        res_dir = avaliar_operacao_bidirecional(
+            ContextoOperacaoFiscal(
+                direcao=dir_sel,
+                finalidade=fin_sel,
+                uf_origem=uf_orig,
+                uf_destino=uf_dest_dir,
+                ncm=ncm_ctx,
+                valor_produto=Decimal(str(vlr_dir)),
+                cst_ou_csosn=cst_dir,
+                cbenef=cbenef_dir,
+                reducao_bc_pct=Decimal(str(red_dir)),
+                tem_st=tem_st_dir,
+                tem_protocolo_st=proto_dir,
+                st_retida_na_origem=retido_dir,
+                mva_original_pct=Decimal(str(mva_dir)),
+                fornecedor_simples_nacional=sn_forn,
+            )
+        )
+
+        risco = res_dir["semaforo_risco"]
+        if risco == "VERDE":
+            st.success(f"🟢 Semáforo de Risco: VERDE — {res_dir['papel_nossa_empresa']} | CFOP {res_dir['cfop_esperado']}")
+        elif risco == "AMARELO":
+            st.warning(f"🟡 Semáforo de Risco: AMARELO (Atenção / Recolhimento) — {res_dir['papel_nossa_empresa']} | CFOP {res_dir['cfop_esperado']}")
+        else:
+            st.error(f"🔴 Semáforo de Risco: VERMELHO (Risco de Autuação/Rejeição) — {res_dir['papel_nossa_empresa']} | CFOP {res_dir['cfop_esperado']}")
+
+        for al in res_dir["alertas_preventivos"]:
+            st.warning(f"⚠️ {al}")
+
+        col_mem, col_leg = st.columns([1.4, 1.0])
+        with col_mem:
+            st.markdown("**Memória de Cálculo Auditável (Passo a Passo)**")
+            st.dataframe(res_dir["memoria_calculo"], use_container_width=True, hide_index=True)
+        with col_leg:
+            st.markdown("**Base Legal Específica**")
+            for b in res_dir["bases_legais"]:
+                st.markdown(f"- {b}")
 
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)
