@@ -97,3 +97,40 @@ def extrair_regra_st_texto_oficial(
         "fonte_url": url_ok,
         "origem_dado": "SYNC_OFICIAL_TEMPO_REAL",
     }
+
+
+def extrair_todos_segmentos_cat68(texto_norma: str, *, uf: str = "SP", fonte_url: str = "https://legislacao.fazenda.sp.gov.br/Paginas/pcat682019.aspx") -> list[dict[str, Any]]:
+    """Varre integralmente todos os anexos/segmentos (I a XXVI) da Portaria CAT 68/2019 sem filtro parcial."""
+    url_ok = validar_url_oficial(fonte_url)
+    resultados: list[dict[str, Any]] = []
+    anexo_atual = "Anexo Geral"
+    for raw_ln in texto_norma.splitlines():
+        ln = raw_ln.strip()
+        if not ln:
+            continue
+        m_anexo = re.match(r"^(ANEXO\s+[IVXLCDM]+(?:\s*[-–—]\s*.*)?)$", ln, re.I)
+        if m_anexo:
+            anexo_atual = m_anexo.group(1).strip()
+            continue
+        m_ncm = re.search(r"\b(\d{4}(?:\.\d{2}(?:\.\d{2})?)?)\b", ln)
+        m_cest = re.search(r"\b(\d{2}\.\d{3}\.\d{2})\b", ln)
+        if not m_ncm and not m_cest:
+            continue
+        ncm_limpo = re.sub(r"\D", "", m_ncm.group(1)) if m_ncm else ""
+        cest_limpo = re.sub(r"\D", "", m_cest.group(1)) if m_cest else ""
+        if len(ncm_limpo) < 4 and len(cest_limpo) != 7:
+            continue
+        m_iva = re.search(r"(\d{1,3}[.,]\d{2})\s*%", ln)
+        resultados.append(
+            {
+                "uf": uf.upper()[:2],
+                "anexo": anexo_atual,
+                "ncm": ncm_limpo,
+                "cest": cest_limpo,
+                "margem_st": float(m_iva.group(1).replace(",", ".")) if m_iva else 0.0,
+                "tem_st": 1,
+                "dispositivo_legal": f"Portaria CAT 68/2019 ({anexo_atual})",
+                "fonte_url": url_ok,
+            }
+        )
+    return resultados

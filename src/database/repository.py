@@ -10,13 +10,17 @@ from typing import Any
 
 
 def normalizar_ncm(valor: str | None) -> str:
-    """Remove pontos/traços e retorna apenas dígitos do NCM."""
+    """Remove pontos/traços/espaços e retorna apenas dígitos do NCM."""
     return re.sub(r"\D", "", str(valor or ""))
 
 
 def normalizar_cest(valor: str | None) -> str:
-    """Remove pontos/traços e retorna apenas dígitos do CEST."""
+    """Remove pontos/traços/espaços e retorna apenas dígitos do CEST."""
     return re.sub(r"\D", "", str(valor or ""))
+
+
+_NCM_SQL = "REPLACE(REPLACE(TRIM(ncm), '.', ''), '-', '')"
+_CEST_SQL = "REPLACE(REPLACE(TRIM(cest), '.', ''), '-', '')"
 
 TABELAS_REGRAS_PERMITIDAS = frozenset(
     {
@@ -84,7 +88,7 @@ def buscar_regra_estadual_icms(
           {filtro_status}
     """
     base_params: list[Any] = [uf_o, uf_d, natureza_operacao, contrib, origem_mercadoria, ref, ref]
-    order_tail = "ORDER BY CASE WHEN origem_mercadoria = ? THEN 1 ELSE 0 END DESC, margem_st DESC, vigencia_inicio DESC, id DESC LIMIT 1"
+    order_tail = f"ORDER BY CASE WHEN origem_mercadoria = ? THEN 1 ELSE 0 END DESC, LENGTH({_NCM_SQL}) DESC, margem_st DESC, vigencia_inicio DESC, id DESC LIMIT 1"
 
     def _exec(extra_where: str, extra_params: list[Any], camada: int, generica: bool = False) -> dict[str, Any] | None:
         sql = f"SELECT * {base_where} {extra_where} {order_tail}"
@@ -96,31 +100,31 @@ def buscar_regra_estadual_icms(
         d["regra_generica_uf"] = generica
         return d
 
-    # Camada 1: UF + NCM (8 dígitos) + CEST (7 dígitos)
+    # Camada 1: Exato 8 dígitos + CEST
     if ncm_limpo and cest_limpo:
-        r = _exec("AND REPLACE(ncm, '.', '') = ? AND REPLACE(cest, '.', '') = ?", [ncm_limpo, cest_limpo], 1)
+        r = _exec(f"AND {_NCM_SQL} = ? AND {_CEST_SQL} = ?", [ncm_limpo, cest_limpo], 1)
         if r:
             return r
 
-    # Camada 2: UF + NCM (8 dígitos), independente de CEST
+    # Camada 2: Exato 8 dígitos (sem filtro restritivo de CEST)
     if ncm_limpo:
-        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo], 2)
+        r = _exec(f"AND {_NCM_SQL} = ?", [ncm_limpo], 2)
         if r:
             return r
 
-    # Camada 3: UF + prefixo NCM (regra cadastrada por posição SH 6 dígitos ou capítulo/posição 4 dígitos)
+    # Camada 3: Prefixo 6 dígitos (subposição SH) -> Prefixo 4 dígitos (posição SH)
     if len(ncm_limpo) >= 6:
-        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo[:6]], 3)
+        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 6)", [ncm_limpo], 3)
         if r:
             return r
     if len(ncm_limpo) >= 4:
-        r = _exec("AND REPLACE(ncm, '.', '') = ?", [ncm_limpo[:4]], 3)
+        r = _exec(f"AND {_NCM_SQL} = SUBSTR(?, 1, 4)", [ncm_limpo], 3)
         if r:
             return r
 
-    # Camada 4: UF + segmento CEST (apenas regra de segmento sem NCM específico)
+    # Camada 4: Segmento CEST (2 primeiros dígitos do CEST, sem NCM específico)
     if len(cest_limpo) >= 2:
-        r = _exec("AND ncm = '' AND REPLACE(cest, '.', '') LIKE ?", [f"{cest_limpo[:2]}%"], 4)
+        r = _exec(f"AND ncm = '' AND {_CEST_SQL} LIKE ?", [f"{cest_limpo[:2]}%"], 4)
         if r:
             return r
 
@@ -144,12 +148,12 @@ def buscar_regra_federal(
     ncm_limpo = normalizar_ncm(ncm)
     cest_limpo = normalizar_cest(cest)
 
-    sql = """
+    sql = f"""
         SELECT *
         FROM regras_federais
         WHERE status_registro = 'ATIVA'
-          AND REPLACE(ncm, '.', '') = ?
-          AND (REPLACE(cest, '.', '') = ? OR cest = '')
+          AND {_NCM_SQL} = ?
+          AND ({_CEST_SQL} = ? OR cest = '')
           AND (ex_tipi = ? OR ex_tipi = '')
           AND vigencia_inicio <= ?
           AND (vigencia_fim IS NULL OR vigencia_fim >= ?)
@@ -189,7 +193,7 @@ def buscar_regra_terceiro(
     """Busca regra ativa na tabela_terceiros para entradas/importados/FCI."""
     ref = _iso_date(data_referencia)
 
-    sql = """
+    sql = f"""
         SELECT *
         FROM tabela_terceiros
         WHERE status_registro = 'ATIVA'
@@ -239,7 +243,7 @@ def buscar_regra_servico(
     """Busca regra ativa de serviços (ISS + PIS/COFINS + CSRF) por CNAE/Município."""
     ref = _iso_date(data_referencia)
 
-    sql = """
+    sql = f"""
         SELECT *
         FROM regras_servicos
         WHERE status_registro = 'ATIVA'

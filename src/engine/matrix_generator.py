@@ -1224,9 +1224,14 @@ def gerar_matriz_consolidada_ncm(
                             regime_tributario="Simples Nacional" if simples else regime_tributario,
                             eh_receita_venda=("Venda de Mercadorias" in nat_nome),
                         )
+                        tem_acordo_st = bool(regra_estadual.get("tem_acordo_st", True))
                         if usa_st:
-                            cst_2 = "70" if sp_o["red_bc"] > 0 else ("60" if (not eh_ent and cfop_int == "5.405") else "10")
-                            csosn_3 = "500" if cst_2 == "60" else "201"
+                            if eh_ent:
+                                cst_2 = "70" if sp_o["red_bc"] > 0 else "60"
+                                csosn_3 = "500"
+                            else:
+                                cst_2 = "70" if sp_o["red_bc"] > 0 else ("60" if cfop_int == "5.405" else "10")
+                                csosn_3 = "500" if cst_2 == "60" else "201"
                         elif sp_o["isento"]:
                             cst_2 = cst_regra if cst_regra in {"40", "41", "50"} else "40"
                             csosn_3 = "400"
@@ -1262,7 +1267,15 @@ def gerar_matriz_consolidada_ncm(
                                 "CSOSN (Orig.CSOSN)": f"{sp_o['orig_dig']}.{csosn_3}" if simples else f"{sp_o['orig_dig']}.102",
                                 "Código cBenef": cbenef if (cst_2 in {"20", "30", "40", "41", "50", "51", "70"} or sp_o["isento"]) else "",
                                 "Tem ST?": "Sim" if usa_st else "Não",
-                                "Responsável ST": "Substituído CST 60/500" if cst_2 == "60" else ("Retida pelo Remetente" if usa_st else "-"),
+                                "Responsável ST": (
+                                    "Antecipada na Entrada (Art. 426-A RICMS/SP / GNRE)"
+                                    if (usa_st and eh_ent and not tem_acordo_st)
+                                    else (
+                                        "Retida pelo Remetente (Convênio/Protocolo)"
+                                        if (usa_st and eh_ent)
+                                        else ("Substituído CST 60/500" if cst_2 == "60" else ("Retida pelo Remetente" if usa_st else "-"))
+                                    )
+                                ),
                                 "Protocolo / Convênio ICMS": protocolo if usa_st else "-",
                                 "MVA Original (%)": round(mva_orig, 2) if usa_st else 0.0,
                                 "MVA Ajustada Nacional (%)": round(mva_aj_nac, 2) if usa_st else 0.0,
@@ -1298,7 +1311,11 @@ def gerar_matriz_consolidada_ncm(
                                 "Soma ST/FCP-ST Custo Médio?": soma_st_custo if usa_st else "N",
                                 "Gera Crédito/Débito?": "N" if cst_2 in {"40", "41", "50", "60"} or simples else "S",
                                 "Fonte Oficial (.gov.br)": fonte_url,
-                                "Observação Padrão NF-e": protocolo or f"Operação {sentido} NCM {ncm} conforme RICMS/{uf_d}",
+                                "Observação Padrão NF-e": (
+                                    f"Antecipação ST na Entrada (Art. 426-A RICMS/{uf_d}) — {protocolo}"
+                                    if (usa_st and eh_ent and not tem_acordo_st)
+                                    else (protocolo or f"Operação {sentido} NCM {ncm} conforme RICMS/{uf_d}")
+                                ),
                                 "Selo Confiabilidade": _selo_confiabilidade(regra_estadual),
                             }
                         )

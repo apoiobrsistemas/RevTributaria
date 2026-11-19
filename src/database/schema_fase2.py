@@ -568,12 +568,14 @@ def consultar_protocolo_st(
     rows = conn.execute(
         """
         SELECT * FROM matriz_protocolos_st
-        WHERE uf_origem = ? AND uf_destino = ?
+        WHERE uf_origem IN (?, '*', 'TODAS') AND uf_destino IN (?, '*')
           AND vigencia_inicio <= ?
           AND (vigencia_fim IS NULL OR vigencia_fim = '' OR vigencia_fim >= ?)
-        ORDER BY length(ncm_prefixo) DESC, id DESC
+        ORDER BY CASE WHEN uf_origem = ? THEN 1 ELSE 0 END DESC,
+                 CASE WHEN uf_destino = ? THEN 1 ELSE 0 END DESC,
+                 length(ncm_prefixo) DESC, id DESC
         """,
-        (uf_o, uf_d, data_ref, data_ref),
+        (uf_o, uf_d, data_ref, data_ref, uf_o, uf_d),
     ).fetchall()
 
     for r in rows:
