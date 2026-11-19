@@ -1255,53 +1255,64 @@ class RevTributariaService:
         )
 
         linhas: list[dict[str, Any]] = []
-        if not cest:
-            from src.engine.st_resolver import resolver_st_3_passos
-            diag_multi = resolver_st_3_passos(
-                conn, ncm=ncm_limpo, uf_origem=uf_origem, uf_destino=uf_destino, data_operacao=ref
-            )
-            segs = diag_multi.get("segmentos_avaliados") or []
-            if len(segs) > 1:
-                reg_base = dict(regras_list[0])
-                for seg in segs:
-                    seg_tem_st = bool(seg.get("tem_st"))
-                    cest_fmt = str(seg.get("cest_formatado") or seg.get("cest") or "")
-                    seg_cod = str(seg.get("segmento_codigo") or "")
-                    reg_seg = dict(seg.get("regra_estadual") or reg_base)
-                    reg_seg["cest"] = str(seg.get("cest") or "")
-                    if not seg_tem_st:
-                        reg_seg["margem_st"] = 0.0
-                        reg_seg["aliquota_icms_st"] = 0.0
-                        reg_seg["cst_icms"] = "00"
-                        reg_seg["tem_st"] = 0
-                        reg_seg["dispositivo_legal"] = str(seg.get("artigo_legal") or "Excluído da ST / Tributado Integralmente")
-                    status_lbl = "ST Vigente" if seg_tem_st else "Excluído ST / Normal"
-                    tag = f"[CEST {cest_fmt} · Seg. {seg_cod} · {status_lbl}]"
-                    geradas = gerar_matriz_ncm(
-                        ncm=ncm_limpo,
-                        uf_origem=uf_origem,
-                        uf_destino=uf_destino,
-                        regra_estadual=reg_seg,
-                        regra_federal=regra_fed,
-                        tabela_terceiros=regra_terc,
-                        regime_tributario=regime_tributario,
-                        atividade_empresa=atividade_empresa,
-                    )
-                    for g in geradas:
-                        g_copy = dict(g)
-                        for nat_k in ("Natureza de Operação", "Natureza da Operação"):
-                            if nat_k in g_copy:
-                                g_copy[nat_k] = f"{g_copy[nat_k]} {tag}"
-                        linhas.append(g_copy)
-                return linhas
+        from src.engine.st_resolver import resolver_st_3_passos
+
+        diag_multi = resolver_st_3_passos(
+            conn, ncm=ncm_limpo, uf_origem=uf_origem, uf_destino=uf_destino, cest=cest, data_operacao=ref
+        )
+        segs = diag_multi.get("segmentos_avaliados") or []
+        if not cest and len(segs) > 1:
+            reg_base = dict(regras_list[0])
+            for seg in segs:
+                seg_tem_st = bool(seg.get("tem_st"))
+                cest_fmt = str(seg.get("cest_formatado") or seg.get("cest") or "")
+                seg_cod = str(seg.get("segmento_codigo") or "")
+                reg_seg = dict(seg.get("regra_estadual") or reg_base)
+                reg_seg["cest"] = str(seg.get("cest") or "")
+                if seg_tem_st:
+                    if float(reg_seg.get("margem_st") or 0) <= 0 and float(seg.get("mva_original") or 0) > 0:
+                        reg_seg["margem_st"] = float(seg["mva_original"])
+                    if float(reg_seg.get("aliquota_icms_st") or 0) <= 0 and float(seg.get("aliquota_interna") or 0) > 0:
+                        reg_seg["aliquota_icms_st"] = float(seg["aliquota_interna"])
+                else:
+                    reg_seg["margem_st"] = 0.0
+                    reg_seg["aliquota_icms_st"] = 0.0
+                    reg_seg["cst_icms"] = "00"
+                    reg_seg["tem_st"] = 0
+                    reg_seg["dispositivo_legal"] = str(seg.get("artigo_legal") or "Excluído da ST / Tributado Integralmente")
+                status_lbl = "ST Vigente" if seg_tem_st else "Excluído ST / Normal"
+                tag = f"[CEST {cest_fmt} · Seg. {seg_cod} · {status_lbl}]"
+                geradas = gerar_matriz_ncm(
+                    ncm=ncm_limpo,
+                    uf_origem=uf_origem,
+                    uf_destino=uf_destino,
+                    regra_estadual=reg_seg,
+                    regra_federal=regra_fed,
+                    tabela_terceiros=regra_terc,
+                    regime_tributario=regime_tributario,
+                    atividade_empresa=atividade_empresa,
+                )
+                for g in geradas:
+                    g_copy = dict(g)
+                    for nat_k in ("Natureza de Operação", "Natureza da Operação"):
+                        if nat_k in g_copy:
+                            g_copy[nat_k] = f"{g_copy[nat_k]} {tag}"
+                    linhas.append(g_copy)
+            return linhas
 
         for regra_est in regras_list:
+            reg_ef = dict(regra_est)
+            if diag_multi.get("tem_st") and float(reg_ef.get("margem_st") or reg_ef.get("mva_original") or 0) <= 0:
+                if float(diag_multi.get("mva_original") or 0) > 0:
+                    reg_ef["margem_st"] = float(diag_multi["mva_original"])
+                if float(reg_ef.get("aliquota_icms_st") or 0) <= 0 and float(diag_multi.get("aliquota_interna") or 0) > 0:
+                    reg_ef["aliquota_icms_st"] = float(diag_multi["aliquota_interna"])
             linhas.extend(
                 gerar_matriz_ncm(
                     ncm=ncm_limpo,
                     uf_origem=uf_origem,
                     uf_destino=uf_destino,
-                    regra_estadual=regra_est,
+                    regra_estadual=reg_ef,
                     regra_federal=regra_fed,
                     tabela_terceiros=regra_terc,
                     regime_tributario=regime_tributario,

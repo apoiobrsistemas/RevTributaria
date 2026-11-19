@@ -867,21 +867,30 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                     "Saídas (5.xxx / 6.xxx)",
                 ]
             )
+            mva_col_cfg = {
+                "MVA Original (%)": st.column_config.NumberColumn("MVA Original (%)", format="%.2f%%"),
+                "MVA Ajustada Nacional (%)": st.column_config.NumberColumn("MVA Ajustada Nacional (%)", format="%.2f%%"),
+                "MVA Ajustada Importado 4% (%)": st.column_config.NumberColumn("MVA Ajustada Importado 4% (%)", format="%.2f%%"),
+                "MVA Simples Nacional (%)": st.column_config.NumberColumn("MVA Simples Nacional (%)", format="%.2f%%"),
+                "Alíq. ST (%)": st.column_config.NumberColumn("Alíq. ST (%)", format="%.2f%%"),
+            }
             with sub_t1:
-                st.dataframe(cons_linhas, use_container_width=True, hide_index=True)
+                st.dataframe(cons_linhas, use_container_width=True, hide_index=True, column_config=mva_col_cfg)
             with sub_t2:
-                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Entrada"], use_container_width=True, hide_index=True)
+                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Entrada"], use_container_width=True, hide_index=True, column_config=mva_col_cfg)
             with sub_t3:
-                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Saída"], use_container_width=True, hide_index=True)
+                st.dataframe([r for r in cons_linhas if r["Sentido"] == "Saída"], use_container_width=True, hide_index=True, column_config=mva_col_cfg)
 
             r_st = next((r for r in cons_linhas if r["Tem ST?"] == "Sim"), cons_linhas[0])
+            if r_st["Tem ST?"] == "Sim" and float(r_st.get("MVA Original (%)") or 0) <= 0 and float(r_st.get("Carga Média / Estimativa Simplificada (%)") or 0) <= 0:
+                st.warning("ST Vigente — MVA pendente de sincronização na Portaria UF")
             with st.expander("🧮 Memória de Cálculo Aberta (MVA Ajustado Entrada vs Saída)", expanded=False):
                 st.markdown(
                     f"**Fórmula Oficial (Convênio ICMS 142/2018):** `MVA Ajustada = [(1 + MVA Original) × (1 - Alíq. Inter) / (1 - Alíq. ST)] - 1`\n\n"
-                    f"- **MVA Original:** `{r_st['MVA Original (%)']}%` | **Alíq. ST:** `{r_st['Alíq. ST (%)']}%` | **FCP-ST:** `{r_st['FCP-ST (%)']}%`\n"
-                    f"- **MVA Ajustada Nacional (12%/7%):** `{r_st['MVA Ajustada Nacional (%)']}%`\n"
-                    f"- **MVA Ajustada Importado (4%):** `{r_st['MVA Ajustada Importado 4% (%)']}%`\n"
-                    f"- **MVA Simples Nacional (sem ajuste):** `{r_st['MVA Simples Nacional (%)']}%`"
+                    f"- **MVA Original:** `{float(r_st['MVA Original (%)']):.2f}%` | **Alíq. ST:** `{float(r_st['Alíq. ST (%)']):.2f}%` | **FCP-ST:** `{float(r_st['FCP-ST (%)']):.2f}%`\n"
+                    f"- **MVA Ajustada Nacional (12%/7%):** `{float(r_st['MVA Ajustada Nacional (%)']):.2f}%`\n"
+                    f"- **MVA Ajustada Importado (4%):** `{float(r_st['MVA Ajustada Importado 4% (%)']):.2f}%`\n"
+                    f"- **MVA Simples Nacional (sem ajuste):** `{float(r_st['MVA Simples Nacional (%)']):.2f}%`"
                 )
 
             st.download_button(

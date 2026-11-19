@@ -207,6 +207,94 @@ def _dados_federais(
     }
 
 
+def _extrair_mva_e_aliq_st(
+    regra_estadual: Mapping[str, Any],
+    uf_origem: str,
+    uf_destino: str,
+    *,
+    beneficio_convenio_52_91: bool = False,
+) -> dict[str, Any]:
+    """Extrai MVA Original (com aliases), Alíq. ST e calcula MVAs Ajustadas Nacional, Importado 4% e SN."""
+    uf_o = uf_origem.upper()[:2]
+    uf_d = uf_destino.upper()[:2]
+    interna_op = uf_o == uf_d
+
+    aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
+    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
+    if aliq_interna <= 0:
+        aliq_interna = float(aliq_uf_d)
+
+    fcp_regra = float(_dec(regra_estadual.get("aliquota_fcp"), "0"))
+    aliq_fcp = fcp_regra if fcp_regra > 0 else float(fcp_uf_d)
+
+    aliq_st_raw = float(_dec(regra_estadual.get("aliquota_icms_st"), "0"))
+    if aliq_st_raw <= 0:
+        aliq_st_raw = float(_dec(regra_estadual.get("aliquota_st"), "0"))
+    aliq_st = aliq_st_raw if aliq_st_raw > 0 else ALIQUOTA_INTERNA_MODAL_UF.get(uf_d, aliq_interna)
+
+    mva_orig = 0.0
+    for k in ("margem_st", "mva_original", "iva_st", "mva"):
+        val = float(_dec(regra_estadual.get(k), "0"))
+        if val > 0:
+            mva_orig = val
+            break
+
+    cst_regra = str(regra_estadual.get("cst_icms") or "").strip()
+    tem_st = bool(
+        regra_estadual.get("tem_st")
+        or mva_orig > 0
+        or aliq_st_raw > 0
+        or cst_regra in {"10", "30", "60", "70"}
+    )
+    regime_estimativa = bool(regra_estadual.get("regime_estimativa_simplificado"))
+    carga_media = float(_dec(regra_estadual.get("percentual_carga_tributaria_media"), "0"))
+    nao_ajusta = bool(regra_estadual.get("nao_ajusta_mva"))
+
+    aliq_inter_nac = float(
+        aliquota_interestadual(uf_o, uf_d if not interna_op else "MG", "0", beneficio_convenio_52_91=beneficio_convenio_52_91)
+        or Decimal("12.00")
+    )
+    aliq_inter_imp4 = float(
+        aliquota_interestadual(uf_o, uf_d if not interna_op else "MG", "2", beneficio_convenio_52_91=beneficio_convenio_52_91)
+        or Decimal("4.00")
+    )
+
+    if not tem_st or mva_orig <= 0 or regime_estimativa:
+        mva_aj_nac = 0.0
+        mva_aj_imp4 = 0.0
+        mva_sn = 0.0
+    else:
+        if interna_op or nao_ajusta or aliq_inter_nac >= aliq_st:
+            mva_aj_nac = round(mva_orig, 2)
+        else:
+            mva_aj_nac = float(
+                calcular_mva_ajustado(mva_orig, aliq_inter_nac, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)
+            )
+        if nao_ajusta or aliq_inter_imp4 >= aliq_st:
+            mva_aj_imp4 = round(mva_orig, 2)
+        else:
+            mva_aj_imp4 = float(
+                calcular_mva_ajustado(mva_orig, aliq_inter_imp4, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)
+            )
+        mva_sn = round(mva_orig, 2)
+
+    return {
+        "tem_st": tem_st,
+        "mva_orig": round(mva_orig, 2),
+        "mva_aj_nac": round(mva_aj_nac, 2),
+        "mva_aj_imp4": round(mva_aj_imp4, 2),
+        "mva_sn": round(mva_sn, 2),
+        "aliq_st": round(aliq_st, 2),
+        "aliq_interna": round(aliq_interna, 2),
+        "aliq_fcp": round(aliq_fcp, 2),
+        "aliq_inter_nac": round(aliq_inter_nac, 2),
+        "aliq_inter_imp4": round(aliq_inter_imp4, 2),
+        "regime_estimativa": regime_estimativa,
+        "carga_media": round(carga_media, 2),
+        "mva_pendente_uf": bool(tem_st and not regime_estimativa and mva_orig <= 0),
+    }
+
+
 def gerar_matriz_ncm(
     ncm: str,
     uf_origem: str,
@@ -221,20 +309,20 @@ def gerar_matriz_ncm(
     uf_o = uf_origem.upper()
     uf_d = uf_destino.upper()
     cest = str(regra_estadual.get("cest") or "")
-    tem_st = bool(regra_estadual.get("tem_st"))
+    conv_52_91 = bool((tabela_terceiros or {}).get("beneficio_convenio_52_91", 0))
+    mva_info = _extrair_mva_e_aliq_st(regra_estadual, uf_o, uf_d, beneficio_convenio_52_91=conv_52_91)
+    tem_st = bool(regra_estadual.get("tem_st") or mva_info["tem_st"])
     tem_acordo = bool(regra_estadual.get("tem_acordo_st", 1))
-    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), "18"))
+    aliq_interna = mva_info["aliq_interna"]
     red_bc = float(_dec(regra_estadual.get("reducao_base_icms"), "0"))
-    aliq_st = float(_dec(regra_estadual.get("aliquota_icms_st"), "0")) or ALIQUOTA_INTERNA_MODAL_UF.get(uf_d, aliq_interna)
-    mva_orig = float(_dec(regra_estadual.get("margem_st"), "0"))
-    fcp_regra = float(_dec(regra_estadual.get("aliquota_fcp"), "0"))
-    aliq_fcp = fcp_regra if fcp_regra > 0 else ALIQUOTA_FCP_PADRAO_UF.get(uf_d, 0.0)
+    aliq_st = mva_info["aliq_st"]
+    mva_orig = mva_info["mva_orig"]
+    aliq_fcp = mva_info["aliq_fcp"]
     difal_regra = float(_dec(regra_estadual.get("aliquota_interna_uf_destino_difal"), "0"))
     aliq_dest_difal = difal_regra if difal_regra > 0 else ALIQUOTA_INTERNA_MODAL_UF.get(uf_d, aliq_interna)
     cbenef = str(regra_estadual.get("codigo_beneficio_fiscal") or "")
     disp_legal = str(regra_estadual.get("dispositivo_legal") or "")
     obs_padrao = str(regra_estadual.get("observacao_padrao") or disp_legal)
-    conv_52_91 = bool((tabela_terceiros or {}).get("beneficio_convenio_52_91", 0))
 
     linhas: list[dict[str, Any]] = []
 
@@ -388,6 +476,22 @@ def gerar_matriz_ncm(
             elif cst_2d in {"00", "10", "60"}:
                 cbenef_linha = ""
 
+        aliq_st_ef = (aliq_st_val if aliq_st_val > 0 else mva_info["aliq_st"]) if eh_st_linha else 0.0
+        mva_orig_ef = (mva_orig_val if mva_orig_val > 0 else mva_info["mva_orig"]) if eh_st_linha else 0.0
+        mva_aj_nac_ef = mva_info["mva_aj_nac"] if eh_st_linha else 0.0
+        mva_aj_imp4_ef = mva_info["mva_aj_imp4"] if eh_st_linha else 0.0
+        mva_sn_ef = mva_info["mva_sn"] if eh_st_linha else 0.0
+        mva_aj_ef = (
+            mva_aj_val
+            if (eh_st_linha and mva_aj_val > 0)
+            else ((mva_aj_nac_ef if orig_cod in {"0", "6"} else mva_aj_imp4_ef) if eh_st_linha else 0.0)
+        )
+        obs_final = obs_linha
+        if eh_st_linha and mva_info["regime_estimativa"] and "Carga Média" not in obs_final:
+            obs_final = f"{obs_final} | Regime Carga Média (Sem MVA)".strip(" |")
+        elif eh_st_linha and mva_info["mva_pendente_uf"] and "MVA pendente" not in obs_final:
+            obs_final = f"{obs_final} | ST Vigente — MVA pendente de sincronização na Portaria UF".strip(" |")
+
         linhas.append(
             {
                 # Bloco Inicial
@@ -425,8 +529,8 @@ def gerar_matriz_ncm(
                 "Alíquota Diferimento": aliq_diferimento,
                 "Percentual FCP Diferimento": perc_fcp_diferimento,
                 "Observação Complementar Diferimento": obs_diferimento,
-                "Alíquota ICMS ST": aliq_st_val,
-                "Margem ST": mva_orig_val,
+                "Alíquota ICMS ST": aliq_st_ef,
+                "Margem ST": mva_orig_ef,
                 "Redução ICMS ST": red_icms_st if eh_st_linha else 0.0,
                 "Utiliza Base ICMS p/ Cálculo ST (S/N)": util_base_icms_st_sn if eh_st_linha else "N",
                 "ICMS ST pago pela empresa em guia (S/N)": st_pago_guia_sn if eh_st_linha else "N",
@@ -455,13 +559,13 @@ def gerar_matriz_ncm(
                 "Perfil (NC/CO)": perfil_sigla,
                 "ICMS Crédito/Débito": icms_cred_deb,
                 "PIS/COFINS Crédito/Débito": fed["pis_cof_cred_deb"],
-                "% MVA ST Ajustada": mva_aj_val,
+                "% MVA ST Ajustada": mva_aj_ef,
                 "DIFAL / FCP": difal_exib,
                 "IPI Alíq.": fed["ipi_aliq"],
                 "cClass": fed["cclass"],
                 "Alíquota CBS": fed["cbs_aliq"],
                 "Alíquota IBS": fed["ibs_aliq"],
-                "Observações": obs_linha,
+                "Observações": obs_final,
             }
         )
 
@@ -1144,14 +1248,16 @@ def avaliar_arvore_booleana_ncm(
     if q_isen:
         regimes_ativos.append("Isenção / Desoneração")
 
-    aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
-    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
-    aliq_fcp = float(_dec(regra_estadual.get("aliquota_fcp"), str(fcp_uf_d)))
-    aliq_st = aliq_st_raw if aliq_st_raw > 0 else aliq_interna
-    aliq_inter_nac = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "0") or Decimal("12.00"))
-    aliq_inter_imp4 = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "2") or Decimal("4.00"))
-    mva_aj_nac = float(calcular_mva_ajustado(mva_orig, aliq_inter_nac, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if q_st else 0.0
-    mva_aj_imp4 = float(calcular_mva_ajustado(mva_orig, aliq_inter_imp4, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if q_st else 0.0
+    mva_info = _extrair_mva_e_aliq_st(regra_estadual, uf_o, uf_d)
+    mva_orig = mva_info["mva_orig"]
+    aliq_interna = mva_info["aliq_interna"]
+    aliq_fcp = mva_info["aliq_fcp"]
+    aliq_st = mva_info["aliq_st"]
+    aliq_inter_nac = mva_info["aliq_inter_nac"]
+    aliq_inter_imp4 = mva_info["aliq_inter_imp4"]
+    mva_aj_nac = mva_info["mva_aj_nac"] if q_st else 0.0
+    mva_aj_imp4 = mva_info["mva_aj_imp4"] if q_st else 0.0
+    mva_sn = mva_info["mva_sn"] if q_st else 0.0
 
     deduz_custo = _sn(regra_estadual.get("deduz_icms_fcp_custo_medio"), default=False)
     soma_st_custo = _sn(regra_estadual.get("somar_icms_st_fcp_st_custo_medio"), default=False)
@@ -1224,9 +1330,12 @@ def avaliar_arvore_booleana_ncm(
                         "ICMS Próprio dentro da ST (%)": round(aliq_inter_val if interestadual else aliq_interna, 2) if eh_st else 0.0,
                         "ICMS Substituído": "Sim" if (eh_st and cst_2 == "60") else "Não",
                         "Margem MVA Original (%)": round(mva_orig, 2) if eh_st else 0.0,
+                        "MVA Original (%)": round(mva_orig, 2) if eh_st else 0.0,
+                        "MVA Ajustada Nacional (%)": round(mva_aj_nac, 2) if eh_st else 0.0,
+                        "MVA Ajustada Importado 4% (%)": round(mva_aj_imp4, 2) if eh_st else 0.0,
                         "MVA Ajustada Entrada (%)": round(mva_aj_val, 2) if (eh_st and eh_ent) else 0.0,
                         "MVA Ajustada Saída (%)": round(mva_aj_val, 2) if (eh_st and not eh_ent) else 0.0,
-                        "MVA Simples Nacional (%)": round(mva_orig, 2) if eh_st else 0.0,
+                        "MVA Simples Nacional (%)": round(mva_sn, 2) if eh_st else 0.0,
                         "Alíq. ST (%)": round(aliq_st, 2) if eh_st else 0.0,
                         "FCP-ST (%)": round(aliq_fcp, 2) if eh_st else 0.0,
                         "Convênio/Protocolo": protocolo if eh_st else "-",
@@ -1340,29 +1449,31 @@ def gerar_matriz_consolidada_ncm(
 
     interestadual = uf_o != uf_d
     cest = str(regra_estadual.get("cest") or "")
-    tem_st = bool(regra_estadual.get("tem_st") or float(_dec(regra_estadual.get("margem_st"), "0")) > 0 or float(_dec(regra_estadual.get("aliquota_icms_st"), "0")) > 0)
+    protocolo = str(regra_estadual.get("dispositivo_legal") or "Convênio ICMS 142/2018")
+    conv_52_91 = "52/91" in protocolo
+    mva_info = _extrair_mva_e_aliq_st(regra_estadual, uf_o, uf_d, beneficio_convenio_52_91=conv_52_91)
+    tem_st = bool(regra_estadual.get("tem_st") or mva_info["tem_st"])
+    if not tem_st and protocolo == "Convênio ICMS 142/2018" and not regra_estadual.get("dispositivo_legal"):
+        protocolo = "-"
     coexiste_trib = bool(regra_estadual.get("coexiste_tributado"))
-    aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
-    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
-    aliq_fcp = float(_dec(regra_estadual.get("aliquota_fcp"), str(fcp_uf_d)))
+    aliq_interna = mva_info["aliq_interna"]
+    aliq_fcp = mva_info["aliq_fcp"]
     red_bc = float(_dec(regra_estadual.get("reducao_base_icms"), "0"))
-    aliq_st = float(_dec(regra_estadual.get("aliquota_icms_st"), str(aliq_interna)))
-    mva_orig = float(_dec(regra_estadual.get("margem_st"), "0"))
+    aliq_st = mva_info["aliq_st"]
+    mva_orig = mva_info["mva_orig"]
     red_st = float(_dec(regra_estadual.get("reducao_icms_st"), "0"))
-    carga_media = float(_dec(regra_estadual.get("percentual_carga_tributaria_media"), "0"))
+    carga_media = mva_info["carga_media"]
     aliq_efetivo = float(_dec(regra_estadual.get("aliquota_icms_efetivo"), "0"))
     red_efetivo = float(_dec(regra_estadual.get("reducao_base_icms_efetivo"), "0"))
     cbenef = str(regra_estadual.get("codigo_beneficio_fiscal") or "")
-    protocolo = str(regra_estadual.get("dispositivo_legal") or ("Convênio ICMS 142/2018" if tem_st else "-"))
     fonte_url = str(regra_estadual.get("fonte_url") or "https://www.confaz.fazenda.gov.br/")
-    conv_52_91 = "52/91" in protocolo
     excecoes_op: Mapping[str, Any] = regra_estadual.get("excecoes_operacao") or {}
 
-    aliq_inter_nac = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "0", beneficio_convenio_52_91=conv_52_91) or Decimal("12.00"))
-    aliq_inter_imp4 = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "2", beneficio_convenio_52_91=conv_52_91) or Decimal("4.00"))
-    mva_aj_nac = float(calcular_mva_ajustado(mva_orig, aliq_inter_nac, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if tem_st else 0.0
-    mva_aj_imp4 = float(calcular_mva_ajustado(mva_orig, aliq_inter_imp4, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if tem_st else 0.0
-    mva_sn = round(mva_orig, 2) if tem_st else 0.0
+    aliq_inter_nac = mva_info["aliq_inter_nac"]
+    aliq_inter_imp4 = mva_info["aliq_inter_imp4"]
+    mva_aj_nac = mva_info["mva_aj_nac"]
+    mva_aj_imp4 = mva_info["mva_aj_imp4"]
+    mva_sn = mva_info["mva_sn"]
 
     deduz_custo = _sn(regra_estadual.get("deduz_icms_fcp_custo_medio"), default=False)
     soma_st_custo = _sn(regra_estadual.get("somar_icms_st_fcp_st_custo_medio"), default=False)
