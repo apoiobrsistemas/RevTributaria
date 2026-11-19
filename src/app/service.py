@@ -2890,10 +2890,17 @@ class RevTributariaService:
 
         conn = self._get_conn()
         ref = data_referencia or date.today().isoformat()
-        regra_est = self.buscar_regra_estadual_vigente(
+        regra_est = buscar_regra_estadual_icms(
+            conn,
             uf_origem=uf_origem,
             uf_destino=uf_destino,
-            ncm=ncm,
+            ncm=ncm.strip(),
+            data_referencia=ref,
+        ) or buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_origem,
+            uf_destino=uf_origem,
+            ncm=ncm.strip(),
             data_referencia=ref,
         )
         if not regra_est:
@@ -2945,11 +2952,20 @@ class RevTributariaService:
     ) -> str:
         from src.engine.backtest_guard import classificar_confiabilidade_deterministica
 
-        reg = self.buscar_regra_estadual_vigente(
+        conn = self._get_conn()
+        ref = data_referencia or date.today().isoformat()
+        reg = buscar_regra_estadual_icms(
+            conn,
             uf_origem=uf_origem,
             uf_destino=uf_destino,
-            ncm=ncm,
-            data_referencia=data_referencia or date.today().isoformat(),
+            ncm=ncm.strip(),
+            data_referencia=ref,
+        ) or buscar_regra_estadual_icms(
+            conn,
+            uf_origem=uf_origem,
+            uf_destino=uf_origem,
+            ncm=ncm.strip(),
+            data_referencia=ref,
         )
         return classificar_confiabilidade_deterministica(reg)
 
