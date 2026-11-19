@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -278,6 +279,12 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
 
 
 def main() -> None:
+    if not hasattr(RevTributariaService, "listar_ids_naturezas_operacao"):
+        import src.app.service as _srv_mod
+
+        importlib.reload(_srv_mod)
+        globals()["RevTributariaService"] = _srv_mod.RevTributariaService
+
     db_path = str(DEFAULT_DB_PATH)
     db_path, usuario = _render_sidebar(db_path)
 

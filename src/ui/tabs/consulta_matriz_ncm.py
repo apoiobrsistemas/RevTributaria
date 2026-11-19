@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import io
 from datetime import date
 
@@ -176,7 +177,14 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     )
 
     # Mapeamento configurável de IDs por Natureza de Operação (persistido no banco)
-    srv_nat = RevTributariaService(db_path)
+    srv_cls = RevTributariaService
+    if not hasattr(srv_cls, "listar_ids_naturezas_operacao"):
+        import src.app.service as _srv_mod
+
+        importlib.reload(_srv_mod)
+        srv_cls = _srv_mod.RevTributariaService
+
+    srv_nat = srv_cls(db_path)
     try:
         ids_salvos = srv_nat.listar_ids_naturezas_operacao()
     finally:
@@ -220,14 +228,14 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
             )
 
         if novos_ids != ids_salvos:
-            srv_save = RevTributariaService(db_path)
+            srv_save = srv_cls(db_path)
             try:
                 ids_salvos = srv_save.salvar_ids_naturezas_operacao(novos_ids)
             finally:
                 srv_save.close()
             st.toast("IDs das Naturezas salvos automaticamente.", icon="✅")
 
-    linhas = RevTributariaService.aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
+    linhas = srv_cls.aplicar_ids_natureza_nas_linhas(linhas, ids_salvos)
 
     # Filtros rápidos
     f1, f2, f3, f4, f5 = st.columns(5)
