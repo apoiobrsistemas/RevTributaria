@@ -218,6 +218,23 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 "Não é permitido presumir Tributado Integralmente sem comprovação normativa."
             )
 
+        srv_3p = RevTributariaService(db_path)
+        try:
+            diag_3p = srv_3p.diagnosticar_st_3_passos(
+                ncm=ncm,
+                uf_origem=uf_orig,
+                uf_destino=uf_dest_res,
+                data_operacao=data_ref.isoformat(),
+            )
+        finally:
+            srv_3p.close()
+
+        with st.expander("🧭 Painel de Rastreabilidade ST — 3 Passos (Conv. 142/18 × UF Destino × Acordo)", expanded=False):
+            p1, p2, p3 = st.columns(3)
+            p1.info(f"**Passo 1 (Convênio 142/2018):**\n\n{diag_3p['passo_1_resumo']}")
+            p2.info(f"**Passo 2 (Legislação {uf_dest_res}):**\n\n{diag_3p['passo_2_resumo']}")
+            p3.info(f"**Passo 3 (Acordo {uf_orig} → {uf_dest_res}):**\n\n{diag_3p['passo_3_resumo']}")
+
         destinos_tuple = tuple(destinos_param) if destinos_param else None
         pre_val = _cache_pre_validacao(db_path, (ncm,), uf_orig, data_ref.isoformat())
         linhas = _cache_matriz_operacional(

@@ -3117,6 +3117,27 @@ class RevTributariaService:
             "iva_st_original": float(regra_extraida["margem_st"]),
         }
 
+    def diagnosticar_st_3_passos(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str = "SP",
+        uf_destino: str = "SP",
+        cest: str = "",
+        data_operacao: str | None = None,
+    ) -> dict[str, Any]:
+        """Executa o diagnóstico de ST em 3 camadas (Conv. 142/18 x UF Destino x Acordo Interestadual)."""
+        from src.engine.st_resolver import resolver_st_3_passos
+
+        return resolver_st_3_passos(
+            self._get_conn(),
+            ncm=ncm,
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            cest=cest,
+            data_operacao=data_operacao,
+        )
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""

@@ -16,6 +16,10 @@ from src.legislation.ai_reader import (
     formatar_ncm,
     normalizar_texto_literal,
 )
+from src.legislation.confaz_ingestor import (
+    garantir_base_confaz_142_e_acordos,
+    parsear_convenio_142_texto,
+)
 from src.legislation.extractor import (
     RecorteMarcadorNaoEncontradoError,
     hash_conteudo_limpo,

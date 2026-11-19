@@ -678,3 +678,43 @@ CREATE TABLE IF NOT EXISTS importacao_itens (
     divergencias_json       TEXT NOT NULL DEFAULT '[]',
     UNIQUE (documento_id, numero_item)
 );
+
+
+-- ----------------------------------------------------------------------------
+-- 11. TABELA-MÃE CONVÊNIO ICMS 142/2018 & ACORDOS INTERESTADUAIS DE ST
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS convenio_142_anexos (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    anexo                   TEXT NOT NULL,
+    segmento_codigo         TEXT NOT NULL,
+    cest                    TEXT NOT NULL,
+    ncm_limpo               TEXT NOT NULL,
+    ncm_raw                 TEXT NOT NULL DEFAULT '',
+    descricao_item          TEXT NOT NULL DEFAULT '',
+    bens_relacionados       TEXT NOT NULL DEFAULT '',
+    elegivel_st_nacional    INTEGER NOT NULL DEFAULT 1 CHECK (elegivel_st_nacional IN (0, 1)),
+    fonte_url               TEXT NOT NULL DEFAULT 'https://www.confaz.fazenda.gov.br/legislacao/convenios/2018/CV142_18',
+    atualizado_em           TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (anexo, cest, ncm_limpo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv142_ncm_cest
+    ON convenio_142_anexos (ncm_limpo, cest, segmento_codigo);
+
+CREATE TABLE IF NOT EXISTS acordos_interestaduais_st (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    uf_origem               TEXT NOT NULL,                -- '*' = Abrangência Nacional, ou UF (ex: 'MG')
+    uf_destino              TEXT NOT NULL,                -- UF de destino (ex: 'SP') ou '*'
+    segmento_cest           TEXT NOT NULL DEFAULT '',     -- 2 dígitos do CEST (ex: '16')
+    ncm_prefixo             TEXT NOT NULL DEFAULT '',     -- 4, 6 ou 8 dígitos (ex: '4011')
+    numero_acordo           TEXT NOT NULL,                -- Ex: 'Convênio ICMS 102/2017', 'Protocolo ICMS 31/2009'
+    tipo_acordo             TEXT NOT NULL DEFAULT 'CONVENIO_NACIONAL' CHECK (tipo_acordo IN ('CONVENIO_NACIONAL', 'PROTOCOLO_BILATERAL')),
+    vigencia_inicio         TEXT NOT NULL DEFAULT '2018-01-01',
+    vigencia_fim            TEXT,
+    observacao              TEXT NOT NULL DEFAULT '',
+    fonte_url               TEXT NOT NULL DEFAULT 'https://www.confaz.fazenda.gov.br/legislacao/convenios/2018/CV142_18',
+    UNIQUE (uf_origem, uf_destino, segmento_cest, ncm_prefixo, numero_acordo)
+);
+
+CREATE INDEX IF NOT EXISTS idx_acordos_st_busca
+    ON acordos_interestaduais_st (uf_origem, uf_destino, segmento_cest, ncm_prefixo, vigencia_inicio, vigencia_fim);
