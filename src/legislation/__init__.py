@@ -21,6 +21,11 @@ from src.legislation.extractor import (
     hash_conteudo_limpo,
     recortar_texto_vigente,
 )
+from src.legislation.nt_validator import (
+    parsear_tabela_dominio_nfe,
+    validar_combinacao_sintatica_nfe,
+    validar_linhas_matriz_nt,
+)
 from src.legislation.official_catalog import (
     CATALOGO_FONTES_OFICIAIS,
     MAPA_8_PORTAIS_SP,
@@ -43,6 +48,9 @@ __all__ = [
     "DominioNaoOficialError",
     "MAPA_8_PORTAIS_SP",
     "OfficialURL",
+    "parsear_tabela_dominio_nfe",
+    "validar_combinacao_sintatica_nfe",
+    "validar_linhas_matriz_nt",
     "RecorteMarcadorNaoEncontradoError",
     "SCHEMA_SAIDA_REGRA_FISCAL",
     "URL_OFICIAL_REGEX",

@@ -5,8 +5,10 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Mapping
 
+from src.engine.backtest_guard import classificar_confiabilidade_deterministica as _selo_confiabilidade
 from src.engine.fiscal_engine import ALIQUOTAS_INTERNAS_UF
 from src.engine.fiscal_math import _dec, aliquota_interestadual, calcular_mva_ajustado
+from src.legislation.nt_validator import validar_linhas_matriz_nt as _validar_linhas_nt
 
 REGIMES_TRIBUTARIOS_EMPRESA: tuple[str, ...] = (
     "Lucro Real",
@@ -1196,6 +1198,7 @@ def gerar_matriz_consolidada_ncm(
                         "Gera Crédito/Débito?": "N" if cst_2 in {"40", "41", "50", "60"} or simples else "S",
                         "Fonte Oficial (.gov.br)": fonte_url,
                         "Observação Padrão NF-e": protocolo or f"Operação {sentido} NCM {ncm} conforme RICMS/{uf_d}",
+                        "Selo Confiabilidade": _selo_confiabilidade(regra_estadual),
                     }
                 )
-    return saida
+    return _validar_linhas_nt(saida)

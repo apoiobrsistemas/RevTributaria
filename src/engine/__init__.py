@@ -11,6 +11,11 @@ from src.engine.auditor import (
     dentro_tolerancia_percentual,
     dentro_tolerancia_valor,
 )
+from src.engine.backtest_guard import (
+    classificar_confiabilidade_deterministica,
+    validar_regra_contra_historico_xml,
+    verificar_vigencia_futura_agendada,
+)
 from src.engine.cclasstrib_catalog import TABELA_CCLASSTRIB, consultar_enquadramento_cclasstrib
 from src.engine.fiscal_engine import (
     ALIQUOTAS_INTERNAS_UF,

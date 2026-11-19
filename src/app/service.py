@@ -2899,7 +2899,7 @@ class RevTributariaService:
         if not regra_est:
             return []
         regra_fed = conn.execute(
-            "SELECT * FROM regras_federais_ncm WHERE ncm = ? ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM regras_federais WHERE ncm = ? ORDER BY id DESC LIMIT 1",
             (ncm.strip(),),
         ).fetchone()
         return gerar_matriz_consolidada_ncm(
@@ -2911,6 +2911,47 @@ class RevTributariaService:
             regime_tributario=regime_tributario,
             atividade_empresa=atividade_empresa,
         )
+
+    def verificar_vigencia_futura_ncm(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str,
+        uf_destino: str,
+        data_operacao: str | None = None,
+    ) -> dict[str, Any]:
+        from src.engine.backtest_guard import verificar_vigencia_futura_agendada
+
+        return verificar_vigencia_futura_agendada(
+            self._get_conn(),
+            ncm=ncm,
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            data_operacao=data_operacao,
+        )
+
+    def executar_backtest_regra_xml(self, *, ncm: str, uf: str) -> dict[str, Any]:
+        from src.engine.backtest_guard import validar_regra_contra_historico_xml
+
+        return validar_regra_contra_historico_xml(self._get_conn(), ncm=ncm, uf=uf)
+
+    def obter_selo_confiabilidade_ncm(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str,
+        uf_destino: str,
+        data_referencia: str | None = None,
+    ) -> str:
+        from src.engine.backtest_guard import classificar_confiabilidade_deterministica
+
+        reg = self.buscar_regra_estadual_vigente(
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            ncm=ncm,
+            data_referencia=data_referencia or date.today().isoformat(),
+        )
+        return classificar_confiabilidade_deterministica(reg)
 
 
 def baixar_bytes_oficiais(url: str) -> bytes:

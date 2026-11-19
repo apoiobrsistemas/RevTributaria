@@ -254,6 +254,34 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         f"{pre_val['ncms_alerta']} Alerta(s), {pre_val['ncms_bloqueio']} Bloqueio(s)."
     )
 
+    ncm_selo_ref = str(linhas[0].get("NCM") if linhas else "")
+    uf_dest_selo = "RJ" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
+    if ncm_selo_ref:
+        srv_gov = RevTributariaService(db_path)
+        try:
+            selo_conf = srv_gov.obter_selo_confiabilidade_ncm(
+                ncm=ncm_selo_ref,
+                uf_origem=uf_orig,
+                uf_destino=uf_dest_selo,
+                data_referencia=data_ref.isoformat(),
+            )
+            vig_fut = srv_gov.verificar_vigencia_futura_ncm(
+                ncm=ncm_selo_ref,
+                uf_origem=uf_orig,
+                uf_destino=uf_dest_selo,
+                data_operacao=data_ref.isoformat(),
+            )
+        finally:
+            srv_gov.close()
+
+        if selo_conf == "A Conferir":
+            st.warning(f"🛡️ **Selo de Confiabilidade Determinística (`{ncm_selo_ref}`):** `{selo_conf}` — Regra pendente de auditoria fiscal.")
+        else:
+            st.success(f"🛡️ **Selo de Confiabilidade Determinística (`{ncm_selo_ref}`):** `{selo_conf}`")
+
+        if vig_fut.get("possui_vigencia_futura") and vig_fut.get("alerta"):
+            st.warning(f"⏳ {vig_fut['alerta']}")
+
     # Mapeamento configurável de IDs por Natureza de Operação (persistido no banco)
     _conn_nat = init_db(db_path)
     try:
