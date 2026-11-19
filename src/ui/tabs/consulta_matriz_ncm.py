@@ -884,6 +884,63 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 type="primary",
             )
 
+    with st.expander("🌳 Árvore Booleana por Hipótese Legal (Individual + Lote Planilha)", expanded=False):
+        ncm_bool_ref = str(filtradas[0].get("NCM") if filtradas else (linhas[0].get("NCM") if linhas else "85071090"))
+        uf_dest_bool = "RJ" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
+        if st.button("🔎 Avaliar Hipóteses Booleanas (NCM Atual)", key="cm_btn_bool_ind"):
+            srv_b = RevTributariaService(db_path)
+            try:
+                st.session_state["cm_bool_ind_res"] = srv_b.executar_arvore_booleana_ncm(
+                    ncm=ncm_bool_ref, uf_origem=uf_orig, uf_destino=uf_dest_bool, data_referencia=data_ref.isoformat()
+                )
+            finally:
+                srv_b.close()
+
+        bool_ind = st.session_state.get("cm_bool_ind_res")
+        if bool_ind:
+            h = bool_ind["hipoteses"]
+            b1, b2, b3, b4, b5 = st.columns(5)
+            b1.metric("Tributado?", "Sim" if h["eh_tributado_integralmente"] else "Não")
+            b2.metric("Importado?", "Sim" if h["pode_ser_importado"] else "Não")
+            b3.metric("Tem ST?", "Sim" if h["pode_ter_st"] else "Não")
+            b4.metric("Redução BC?", "Sim" if h["tem_reducao_base"] else "Não")
+            b5.metric("Isenção/Deson.?", "Sim" if h["tem_isencao_ou_desoneracao"] else "Não")
+            st.dataframe(bool_ind["linhas"], use_container_width=True, hide_index=True)
+
+        up_bool_lote = st.file_uploader(
+            "Upload em Lote para Árvore Booleana (.xlsx / .csv com NCM + UF Origem/Destino)",
+            type=["xlsx", "csv"],
+            key="cm_up_bool_lote",
+        )
+        if up_bool_lote and st.button("🚀 Processar Lote na Árvore Booleana", key="cm_btn_bool_lote", type="primary"):
+            prog = st.progress(0, text="Lendo planilha de NCMs...")
+            srv_bl = RevTributariaService(db_path)
+            try:
+                ncms_bl = srv_bl.extrair_ncms_de_arquivo(up_bool_lote.name, up_bool_lote.getvalue())
+                prog.progress(40, text=f"Avaliando {len(ncms_bl)} NCM(s) na árvore booleana...")
+                res_bl = srv_bl.executar_arvore_booleana_lote_planilha(
+                    [{"ncm": x} for x in ncms_bl],
+                    uf_origem_padrao=uf_orig,
+                    uf_destino_padrao=uf_dest_bool,
+                    data_referencia=data_ref.isoformat(),
+                )
+                prog.progress(100, text="Concluído!")
+                st.session_state["cm_bool_lote_res"] = res_bl
+            finally:
+                srv_bl.close()
+
+        res_bl = st.session_state.get("cm_bool_lote_res")
+        if res_bl and res_bl.get("linhas"):
+            st.dataframe(res_bl["resumo_ncms"], use_container_width=True, hide_index=True)
+            st.dataframe(res_bl["linhas"][:200], use_container_width=True, hide_index=True)
+            st.download_button(
+                "📥 Exportar Árvore Booleana em Lote (.xlsx)",
+                data=exportar_tabela_crua_xlsx(res_bl["linhas"], sheet_name="Arvore_Booleana_NCM"),
+                file_name="arvore_booleana_lote.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_bool_lote_xlsx",
+            )
+
     if filtradas:
         nome_base = nome_export.rsplit(".", 1)[0]
         colunas_export = list(filtradas[0].keys())

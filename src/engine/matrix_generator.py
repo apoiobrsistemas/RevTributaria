@@ -1032,6 +1032,222 @@ def validar_linhas_matriz_sre_70(linhas: list[dict[str, Any]]) -> list[dict[str,
     return linhas
 
 
+def avaliar_arvore_booleana_ncm(
+    ncm: str,
+    uf_origem: str,
+    uf_destino: str,
+    regra_estadual: Mapping[str, Any],
+    regra_federal: Mapping[str, Any] | None = None,
+    *,
+    eh_tributado_integralmente: bool | None = None,
+    pode_ser_importado: bool | None = None,
+    pode_ter_st: bool | None = None,
+    tem_reducao_base: bool | None = None,
+    tem_isencao_ou_desoneracao: bool | None = None,
+    regime_tributario: str = "Lucro Real",
+) -> dict[str, Any]:
+    """Árvore de Questionamento Booleano (Sim/Não) por hipótese legal para um NCM."""
+    ncm_limpo = "".join(c for c in str(ncm or "") if c.isdigit()).zfill(8)[:8]
+    uf_o = uf_origem.upper()[:2]
+    uf_d = uf_destino.upper()[:2]
+    interestadual = uf_o != uf_d
+
+    cest = str(regra_estadual.get("cest") or "")
+    red_bc = float(_dec(regra_estadual.get("reducao_base_icms"), "0"))
+    mva_orig = float(_dec(regra_estadual.get("margem_st"), "0"))
+    aliq_st_raw = float(_dec(regra_estadual.get("aliquota_icms_st"), "0"))
+    cst_regra = str(regra_estadual.get("cst_icms") or "").strip()
+    aliq_deson = float(_dec(regra_estadual.get("aliquota_icms_desonerado"), "0"))
+    aliq_fcp_deson = float(_dec(regra_estadual.get("aliquota_fcp_desonerado"), "0"))
+    motivo_deson = str(regra_estadual.get("motivo_desoneracao") or "")
+    aliq_diferim = float(_dec(regra_estadual.get("aliquota_diferimento"), "0"))
+    cbenef = str(regra_estadual.get("codigo_beneficio_fiscal") or "")
+    protocolo = str(regra_estadual.get("dispositivo_legal") or "RICMS / Convênio ICMS 142/2018")
+
+    # Respostas booleanas das 5 hipóteses
+    q_st = bool(pode_ter_st if pode_ter_st is not None else (regra_estadual.get("tem_st") or mva_orig > 0 or aliq_st_raw > 0 or cst_regra in {"10", "30", "60", "70"}))
+    q_red = bool(tem_reducao_base if tem_reducao_base is not None else (red_bc > 0))
+    q_isen = bool(tem_isencao_ou_desoneracao if tem_isencao_ou_desoneracao is not None else (cst_regra in {"40", "41", "50", "51"} or aliq_deson > 0 or aliq_diferim > 0))
+    q_imp = bool(pode_ser_importado if pode_ser_importado is not None else regra_estadual.get("pode_ser_importado", True))
+    q_trib = bool(
+        eh_tributado_integralmente
+        if eh_tributado_integralmente is not None
+        else (regra_estadual.get("coexiste_tributado") or (not q_st and not q_red and not q_isen))
+    )
+
+    hipoteses = {
+        "eh_tributado_integralmente": q_trib,
+        "pode_ser_importado": q_imp,
+        "pode_ter_st": q_st,
+        "tem_reducao_base": q_red,
+        "tem_isencao_ou_desoneracao": q_isen,
+    }
+
+    regimes_ativos: list[str] = []
+    if q_trib:
+        regimes_ativos.append("Tributado Integralmente")
+    if q_st:
+        regimes_ativos.append("ST")
+    if q_red:
+        regimes_ativos.append("Redução de Base")
+    if q_isen:
+        regimes_ativos.append("Isenção / Desoneração")
+
+    aliq_uf_d, fcp_uf_d = ALIQUOTAS_INTERNAS_UF.get(uf_d, (Decimal("18.00"), Decimal("0.00")))
+    aliq_interna = float(_dec(regra_estadual.get("aliquota_icms"), str(aliq_uf_d)))
+    aliq_fcp = float(_dec(regra_estadual.get("aliquota_fcp"), str(fcp_uf_d)))
+    aliq_st = aliq_st_raw if aliq_st_raw > 0 else aliq_interna
+    aliq_inter_nac = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "0") or Decimal("12.00"))
+    aliq_inter_imp4 = float(aliquota_interestadual(uf_o, uf_d if interestadual else "MG", "2") or Decimal("4.00"))
+    mva_aj_nac = float(calcular_mva_ajustado(mva_orig, aliq_inter_nac, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if q_st else 0.0
+    mva_aj_imp4 = float(calcular_mva_ajustado(mva_orig, aliq_inter_imp4, aliq_st, uf_destino=uf_d, fcp_pct=aliq_fcp)) if q_st else 0.0
+
+    deduz_custo = _sn(regra_estadual.get("deduz_icms_fcp_custo_medio"), default=False)
+    soma_st_custo = _sn(regra_estadual.get("somar_icms_st_fcp_st_custo_medio"), default=False)
+    bc_dupla = _sn(regra_estadual.get("utiliza_bc_dupla_difal"), default=(interestadual and uf_d != "ES"))
+    somar_ipi_difal = _sn(regra_estadual.get("somar_ipi_base_difal_fcp"), default=False)
+    aliq_efetivo = float(_dec(regra_estadual.get("aliquota_icms_efetivo"), str(aliq_interna if q_st else 0.0)))
+    cst_ibs_cbs = str((regra_federal or {}).get("cst_ibs_cbs") or "000")
+
+    origens = [("Nacional", "0", aliq_inter_nac, mva_aj_nac)]
+    if q_imp:
+        origens.append(("Importado (4%)", "2", aliq_inter_imp4, mva_aj_imp4))
+
+    operacoes = [
+        ("Entrada", "(E) Compra para Comercialização", "Contribuinte", "1.403", "2.403", "1.102", "2.102", False),
+        ("Saída", "(S) Venda de Mercadorias — Contribuinte", "Contribuinte", "5.405", "6.404", "5.102", "6.102", False),
+        ("Saída", "(S) Venda de Mercadorias — Não Contribuinte", "Não Contribuinte", "5.405", "6.108", "5.102", "6.108", interestadual),
+    ]
+
+    linhas: list[dict[str, Any]] = []
+    for sentido, nat_nome, perfil, cfop_i_st, cfop_e_st, cfop_i_n, cfop_e_n, tem_difal in operacoes:
+        eh_ent = sentido == "Entrada"
+        fed = _dados_federais(
+            regra_federal,
+            eh_ent,
+            regime_tributario=regime_tributario,
+            eh_receita_venda=("Venda de Mercadorias" in nat_nome),
+        )
+        for reg_nome in regimes_ativos:
+            eh_st = reg_nome == "ST"
+            eh_red = reg_nome == "Redução de Base"
+            eh_isen = reg_nome == "Isenção / Desoneração"
+
+            for orig_lbl, orig_dig, aliq_inter_val, mva_aj_val in origens:
+                if eh_st:
+                    cst_2 = "70" if q_red else ("60" if (eh_ent or cfop_i_st == "5.405" and not interestadual) else "10")
+                    csosn_3 = "500" if cst_2 == "60" else "201"
+                elif eh_isen:
+                    cst_2 = cst_regra if cst_regra in {"40", "41", "51"} else "40"
+                    csosn_3 = "400"
+                elif eh_red:
+                    cst_2 = "20"
+                    csosn_3 = "102"
+                else:
+                    cst_2 = "00"
+                    csosn_3 = "102"
+
+                red_aplicada = red_bc if (eh_red or (eh_st and q_red)) else 0.0
+                aliq_icms_ef = 0.0 if eh_isen else round(aliq_interna * (1.0 - red_aplicada / 100.0), 2)
+                difal_val = round(max(0.0, aliq_interna + aliq_fcp - aliq_inter_val), 2) if (tem_difal and not eh_isen) else 0.0
+                cfop_int = cfop_i_st if eh_st else cfop_i_n
+                cfop_inter = cfop_e_st if eh_st else cfop_e_n
+
+                linhas.append(
+                    {
+                        "Cenário / Nomenclatura Fiscal": f"[{sentido.upper()}] NCM {ncm_limpo} | {reg_nome} ({orig_lbl})",
+                        "Sentido": sentido,
+                        "Natureza de Operação": nat_nome,
+                        "Perfil Destinatário/Remetente": perfil,
+                        "NCM": ncm_limpo,
+                        "CEST": cest,
+                        "Origem": orig_lbl,
+                        "Enquadramento ICMS": reg_nome,
+                        "CFOP Interno": cfop_int,
+                        "CFOP Interestadual": cfop_inter,
+                        "CST (Orig.CST)": f"{orig_dig}.{cst_2}",
+                        "CSOSN (Orig.CSOSN)": f"{orig_dig}.{csosn_3}",
+                        "Código Beneficio Fiscal (cBenef)": cbenef if (eh_red or eh_isen or cst_2 == "70") else "",
+                        "% Redução BC ICMS": round(red_aplicada, 2),
+                        "Carga Final (%)": round(aliq_icms_ef + (0.0 if eh_isen else aliq_fcp), 2),
+                        "ICMS Próprio dentro da ST (%)": round(aliq_inter_val if interestadual else aliq_interna, 2) if eh_st else 0.0,
+                        "ICMS Substituído": "Sim" if (eh_st and cst_2 == "60") else "Não",
+                        "Margem MVA Original (%)": round(mva_orig, 2) if eh_st else 0.0,
+                        "MVA Ajustada Entrada (%)": round(mva_aj_val, 2) if (eh_st and eh_ent) else 0.0,
+                        "MVA Ajustada Saída (%)": round(mva_aj_val, 2) if (eh_st and not eh_ent) else 0.0,
+                        "MVA Simples Nacional (%)": round(mva_orig, 2) if eh_st else 0.0,
+                        "Alíq. ST (%)": round(aliq_st, 2) if eh_st else 0.0,
+                        "FCP-ST (%)": round(aliq_fcp, 2) if eh_st else 0.0,
+                        "Convênio/Protocolo": protocolo if eh_st else "-",
+                        "Alíq. ICMS Efetivo (%)": round(aliq_efetivo, 2) if (eh_st and cst_2 == "60") else 0.0,
+                        "Alíq. ICMS Desonerado (%)": round(aliq_deson, 2) if eh_isen else 0.0,
+                        "Alíq. FCP Desonerado (%)": round(aliq_fcp_deson, 2) if eh_isen else 0.0,
+                        "Motivo Desoneração": motivo_deson if eh_isen else "",
+                        "Alíq. Diferimento (%)": round(aliq_diferim, 2) if (eh_isen and cst_2 == "51") else 0.0,
+                        "Alíq. ICMS Interna (%)": 0.0 if eh_isen else round(aliq_interna, 2),
+                        "Alíq. ICMS Interestadual (%)": 0.0 if eh_isen else round(aliq_inter_val, 2),
+                        "FCP (%)": 0.0 if eh_isen else round(aliq_fcp, 2),
+                        "DIFAL (%)": difal_val,
+                        "Metodologia DIFAL": "Base Dupla" if bc_dupla == "S" else ("Soma IPI na Base" if somar_ipi_difal == "S" else "Base Única"),
+                        "CST PIS": fed["pis_cst"],
+                        "Alíq. PIS (%)": fed["pis_aliq"],
+                        "CST COFINS": fed["cofins_cst"],
+                        "Alíq. COFINS (%)": fed["cofins_aliq"],
+                        "CST IPI": fed["ipi_cst"],
+                        "cEnq": fed["cenq_ipi"],
+                        "Alíq. IPI (%)": fed["ipi_aliq"],
+                        "CST IBS/CBS": cst_ibs_cbs,
+                        "cClassTrib": fed["cclass"],
+                        "Alíq. IBS (%)": fed["ibs_aliq"],
+                        "Alíq. CBS (%)": fed["cbs_aliq"],
+                        "Deduz ICMS/FCP Custo Médio?": deduz_custo,
+                        "Soma ST/FCP-ST Custo Médio?": soma_st_custo if eh_st else "N",
+                        "Gera Crédito/Débito?": "N" if (eh_isen or cst_2 == "60") else "S",
+                        "Observação Legal": protocolo,
+                    }
+                )
+
+    return {
+        "ncm": ncm_limpo,
+        "hipoteses": hipoteses,
+        "regimes_ativos": regimes_ativos,
+        "linhas": linhas,
+    }
+
+
+def avaliar_arvore_booleana_lote(itens: list[dict[str, Any]]) -> dict[str, Any]:
+    """Executa a árvore booleana em lote para múltiplos NCMs de planilha."""
+    resumo_ncms: list[dict[str, Any]] = []
+    todas_linhas: list[dict[str, Any]] = []
+    for it in itens:
+        res = avaliar_arvore_booleana_ncm(
+            ncm=str(it["ncm"]),
+            uf_origem=str(it.get("uf_origem") or "SP"),
+            uf_destino=str(it.get("uf_destino") or "SP"),
+            regra_estadual=it.get("regra_estadual") or {},
+            regra_federal=it.get("regra_federal"),
+            eh_tributado_integralmente=it.get("eh_tributado_integralmente"),
+            pode_ser_importado=it.get("pode_ser_importado"),
+            pode_ter_st=it.get("pode_ter_st"),
+            tem_reducao_base=it.get("tem_reducao_base"),
+            tem_isencao_ou_desoneracao=it.get("tem_isencao_ou_desoneracao"),
+        )
+        h = res["hipoteses"]
+        resumo_ncms.append(
+            {
+                "NCM": res["ncm"],
+                "Tributado?": "Sim" if h["eh_tributado_integralmente"] else "Não",
+                "Importado?": "Sim" if h["pode_ser_importado"] else "Não",
+                "Tem ST?": "Sim" if h["pode_ter_st"] else "Não",
+                "Redução BC?": "Sim" if h["tem_reducao_base"] else "Não",
+                "Isenção/Deson.?": "Sim" if h["tem_isencao_ou_desoneracao"] else "Não",
+                "Qtd Linhas": len(res["linhas"]),
+            }
+        )
+        todas_linhas.extend(res["linhas"])
+    return {"resumo_ncms": resumo_ncms, "linhas": todas_linhas}
+
+
 def gerar_matriz_consolidada_ncm(
     ncm: str,
     uf_origem: str,

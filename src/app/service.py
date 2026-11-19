@@ -3165,6 +3165,71 @@ class RevTributariaService:
             data_operacao=data_operacao,
         )
 
+    def executar_arvore_booleana_ncm(
+        self,
+        *,
+        ncm: str,
+        uf_origem: str = "SP",
+        uf_destino: str = "RJ",
+        data_referencia: str | None = None,
+    ) -> dict[str, Any]:
+        from src.database.repository import normalizar_ncm
+        from src.engine.matrix_generator import avaliar_arvore_booleana_ncm
+
+        conn = self._get_conn()
+        ncm_l = normalizar_ncm(ncm)
+        ref = data_referencia or date.today().isoformat()
+        reg_est = buscar_regra_estadual_icms(
+            conn, uf_origem=uf_origem, uf_destino=uf_destino, ncm=ncm_l, data_referencia=ref
+        ) or buscar_regra_estadual_icms(
+            conn, uf_origem=uf_origem, uf_destino=uf_origem, ncm=ncm_l, data_referencia=ref
+        ) or {}
+        reg_fed = conn.execute("SELECT * FROM regras_federais WHERE REPLACE(ncm, '.', '') = ? ORDER BY id DESC LIMIT 1", (ncm_l,)).fetchone()
+        return avaliar_arvore_booleana_ncm(
+            ncm=ncm_l,
+            uf_origem=uf_origem,
+            uf_destino=uf_destino,
+            regra_estadual=dict(reg_est),
+            regra_federal=dict(reg_fed) if reg_fed else None,
+        )
+
+    def executar_arvore_booleana_lote_planilha(
+        self,
+        itens: list[dict[str, Any]],
+        *,
+        uf_origem_padrao: str = "SP",
+        uf_destino_padrao: str = "RJ",
+        data_referencia: str | None = None,
+    ) -> dict[str, Any]:
+        from src.database.repository import normalizar_ncm
+        from src.engine.matrix_generator import avaliar_arvore_booleana_lote
+
+        conn = self._get_conn()
+        ref = data_referencia or date.today().isoformat()
+        preparados: list[dict[str, Any]] = []
+        for it in itens:
+            ncm_l = normalizar_ncm(str(it.get("ncm") or it.get("NCM") or ""))
+            if len(ncm_l) != 8:
+                continue
+            uf_o = str(it.get("uf_origem") or it.get("UF Origem") or uf_origem_padrao).upper()[:2]
+            uf_d = str(it.get("uf_destino") or it.get("UF Destino") or uf_destino_padrao).upper()[:2]
+            reg_est = buscar_regra_estadual_icms(
+                conn, uf_origem=uf_o, uf_destino=uf_d, ncm=ncm_l, data_referencia=ref
+            ) or buscar_regra_estadual_icms(
+                conn, uf_origem=uf_o, uf_destino=uf_o, ncm=ncm_l, data_referencia=ref
+            ) or {}
+            reg_fed = conn.execute("SELECT * FROM regras_federais WHERE REPLACE(ncm, '.', '') = ? ORDER BY id DESC LIMIT 1", (ncm_l,)).fetchone()
+            preparados.append(
+                {
+                    "ncm": ncm_l,
+                    "uf_origem": uf_o,
+                    "uf_destino": uf_d,
+                    "regra_estadual": dict(reg_est),
+                    "regra_federal": dict(reg_fed) if reg_fed else None,
+                }
+            )
+        return avaliar_arvore_booleana_lote(preparados)
+
 
 def baixar_bytes_oficiais(url: str) -> bytes:
     """Helper de download oficial usando a whitelist obrigatória."""
