@@ -115,7 +115,10 @@ def _render_sidebar(db_path: str) -> tuple[str, str]:
                     snap_res = restaurar_snapshot_se_necessario(db_path)
                 if snap_res.get("restaurado"):
                     _limpar_cache()
-                res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
+                try:
+                    res_dia = srv_dia.executar_rotina_diaria_ao_abrir(uf_origem="SP")
+                except Exception:
+                    res_dia = {"executado_agora": False, "ultima_data": "Hoje", "resumo": {}}
                 st.session_state["rotina_diaria_verificada_sessao"] = True
                 st.session_state["rotina_diaria_info"] = res_dia
                 if res_dia.get("executado_agora"):
