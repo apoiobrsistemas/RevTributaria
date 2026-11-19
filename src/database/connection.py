@@ -37,7 +37,7 @@ def init_db(
     conn = get_connection(db_path)
     if not is_mem and cache_key in _INITIALIZED_DBS and Path(db_str).exists():
         existe = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='regras_estaduais' LIMIT 1"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='regras_importacao_ncm' LIMIT 1"
         ).fetchone()
         if existe is not None:
             return conn

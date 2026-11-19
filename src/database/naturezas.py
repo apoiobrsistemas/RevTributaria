@@ -30,17 +30,26 @@ def _garantir_tabela_naturezas(conn: sqlite3.Connection) -> None:
 
 
 def listar_ids_naturezas_operacao_db(conn: sqlite3.Connection) -> dict[str, int]:
-    """Retorna os IDs externos configurados para cada Natureza de Operação."""
-    with conn:
-        _garantir_tabela_naturezas(conn)
-        for nat in NATUREZAS_OPERACAO_PADRAO:
-            conn.execute(
-                "INSERT OR IGNORE INTO naturezas_operacao_ids (natureza_operacao, id_natureza) VALUES (?, 0)",
-                (nat,),
-            )
-    rows = conn.execute(
-        "SELECT natureza_operacao, id_natureza FROM naturezas_operacao_ids"
-    ).fetchall()
+    """Retorna os IDs externos configurados para cada Natureza de Operação (somente leitura quando já populada)."""
+    try:
+        rows = conn.execute(
+            "SELECT natureza_operacao, id_natureza FROM naturezas_operacao_ids"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    if not rows:
+        with conn:
+            _garantir_tabela_naturezas(conn)
+            for nat in NATUREZAS_OPERACAO_PADRAO:
+                conn.execute(
+                    "INSERT OR IGNORE INTO naturezas_operacao_ids (natureza_operacao, id_natureza) VALUES (?, 0)",
+                    (nat,),
+                )
+        rows = conn.execute(
+            "SELECT natureza_operacao, id_natureza FROM naturezas_operacao_ids"
+        ).fetchall()
+
     mapa_db = {str(r["natureza_operacao"]): int(r["id_natureza"] or 0) for r in rows}
     resultado: dict[str, int] = {}
     for nat in NATUREZAS_OPERACAO_PADRAO:
