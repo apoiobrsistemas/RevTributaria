@@ -28,6 +28,13 @@ from src.integrations.microvix_conciliador import (
     exportar_relatorio_auditoria_lote_xlsx,
     sanitizar_celula_planilha,
 )
+from src.integrations.microvix_config_exporter import (
+    COLUNAS_MICROVIX_71,
+    SHEET_NAME_MICROVIX,
+    exportar_microvix_xlsx,
+    gerar_linhas_microvix,
+    validar_planilha_microvix,
+)
 from src.integrations.nfe_collector import (
     extrair_metadados_emitente_xml,
     ingerir_nfe_idempotente,
@@ -42,18 +49,22 @@ from src.integrations.xml_entrada_parser import (
 
 __all__ = [
     "COLUNAS_LAYOUT_LINX_TERCEIRO",
+    "COLUNAS_MICROVIX_71",
     "METODOS_SUPORTADOS",
     "MICROVIX_ENDPOINT",
     "MicrovixClient",
     "MicrovixError",
+    "SHEET_NAME_MICROVIX",
     "XMLSegurancaError",
     "conciliar_lote_com_microvix",
     "consultar_regime_cnpj",
     "converter_linhas_para_layout_linx_terceiro",
     "exportar_layout_linx_terceiro_csv",
     "exportar_layout_linx_terceiro_xlsx",
+    "exportar_microvix_xlsx",
     "exportar_relatorio_auditoria_lote_xlsx",
     "extrair_metadados_emitente_xml",
+    "gerar_linhas_microvix",
     "identificar_perna_operacao",
     "importar_planilha_matriz_erp",
     "ingerir_nfe_idempotente",
@@ -68,4 +79,5 @@ __all__ = [
     "sanitizar_celula_planilha",
     "separar_origem_cst",
     "sincronizar_metodo",
+    "validar_planilha_microvix",
 ]

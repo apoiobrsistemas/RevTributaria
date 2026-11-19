@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import io
 from datetime import date
 from decimal import Decimal
@@ -16,26 +17,6 @@ from src.database.naturezas import (
     listar_ids_naturezas_operacao_db,
     salvar_ids_naturezas_operacao_db,
 )
-from src.engine.fiscal_engine import (
-    ContextoOperacaoFiscal,
-    avaliar_operacao_bidirecional,
-    resolver_parametros_estaduais,
-)
-from src.engine.lote_entrada_auditor import auditar_lote_xml_entrada
-from src.engine.reforma_tributaria_engine import (
-    ContextoReformaLC214,
-    calcular_transicao_lc214,
-)
-from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
-from src.integrations.linx_terceiro_exporter import (
-    exportar_layout_linx_terceiro_csv,
-    exportar_layout_linx_terceiro_xlsx,
-)
-from src.integrations.microvix_conciliador import (
-    conciliar_lote_com_microvix,
-    exportar_relatorio_auditoria_lote_xlsx,
-)
-from src.integrations.xml_entrada_parser import parsear_arquivos_entrada
 from src.ui.design_system import formatar_ncm_mascara
 
 UFS_BR = [
@@ -47,6 +28,32 @@ UFS_BR = [
 
 def render_consulta_matriz_ncm(*, db_path: str) -> None:
     """Renderiza a consulta completa linha a linha (1 NCM ou lote de NCMs via arquivo)."""
+    import src.engine.fiscal_engine as _fe_mod
+
+    if not hasattr(_fe_mod, "resolver_parametros_estaduais"):
+        importlib.reload(_fe_mod)
+    ContextoOperacaoFiscal = _fe_mod.ContextoOperacaoFiscal
+    avaliar_operacao_bidirecional = _fe_mod.avaliar_operacao_bidirecional
+    resolver_parametros_estaduais = _fe_mod.resolver_parametros_estaduais
+
+    from src.engine.lote_entrada_auditor import auditar_lote_xml_entrada
+    from src.engine.reforma_tributaria_engine import ContextoReformaLC214, calcular_transicao_lc214
+    from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
+    from src.integrations.linx_terceiro_exporter import (
+        exportar_layout_linx_terceiro_csv,
+        exportar_layout_linx_terceiro_xlsx,
+    )
+    from src.integrations.microvix_conciliador import (
+        conciliar_lote_com_microvix,
+        exportar_relatorio_auditoria_lote_xlsx,
+    )
+    from src.integrations.microvix_config_exporter import (
+        exportar_microvix_xlsx,
+        gerar_linhas_microvix,
+        validar_planilha_microvix,
+    )
+    from src.integrations.xml_entrada_parser import parsear_arquivos_entrada
+
     st.markdown(
         '<div class="rev-section-card notranslate" translate="no">'
         '<div class="rev-section-header">'
@@ -510,6 +517,80 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 file_name="auditoria_lote_entradas_microvix.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="cm_lote_dl_xlsx",
+            )
+
+    with st.expander("📤 Exportar Configuração Tributária (Padrão Linx Microvix — Aba 'Configurações Tributárias')", expanded=False):
+        mx1, mx2, mx3, mx4, mx5 = st.columns([1.1, 0.9, 0.9, 1.1, 1.2])
+        mx_ids = mx1.text_input("ID Config (ex: 1 ou 1,2,3,4,5)", value="1", key="cm_mx_ids")
+        mx_nat = mx2.text_input("Natureza de Operação", value="43", key="cm_mx_nat")
+        mx_obs = mx3.text_input("Observação Padrão (opc.)", value="", key="cm_mx_obs")
+        mx_reg_pc = mx4.selectbox("Regime PIS/COFINS", ["Lucro Real", "Lucro Presumido", "Simples Nacional"], key="cm_mx_reg")
+        mx_orig = mx5.selectbox(
+            "Origem Mercadoria",
+            ["0 - Nacional", "1 - Importação Direta", "2 - Importada Merc. Interno", "3 - Nacional >40% Imp.", "5 - Nacional <=40% Imp.", "8 - Nacional >70% Imp."],
+            key="cm_mx_orig",
+        )
+        mx_escopo = st.radio(
+            "Escopo de Exportação",
+            [
+                "Modo 1 — Operação Consultada (1 linha exata por ID Config)",
+                "Modo 2 — Matriz Nacional Completa (27 UFs x Contribuinte S/N = 54 linhas por ID Config)",
+            ],
+            horizontal=True,
+            key="cm_mx_escopo",
+        )
+        mx_dir_col, mx_fin_col, mx_cst_col = st.columns(3)
+        mx_dir = mx_dir_col.selectbox("Direção (Regra UF Linx)", ["SAIDA", "ENTRADA"], key="cm_mx_dir")
+        mx_fin = mx_fin_col.selectbox("Finalidade", ["COMERCIALIZACAO", "INDUSTRIALIZACAO", "USO_CONSUMO", "ATIVO_IMOBILIZADO", "DEVOLUCAO"], key="cm_mx_fin")
+        mx_cst = mx_cst_col.selectbox("CST ICMS Base", ["00", "10", "20", "30", "40", "41", "50", "51", "60", "70", "90"], key="cm_mx_cst")
+
+        ncm_mx = str(linhas[0].get("NCM") if linhas else "85071090")
+        uf_parceiro_mx = "SP" if uf_dest_sel == "Todas (27 UFs)" else uf_dest_sel
+        obs_int = int(mx_obs.strip()) if mx_obs.strip().isdigit() else None
+        _conn_mx = init_db(db_path)
+        try:
+            linhas_mx = gerar_linhas_microvix(
+                conn=_conn_mx,
+                id_configs=mx_ids,
+                natureza_operacao=mx_nat,
+                direcao=mx_dir,
+                finalidade=mx_fin,
+                uf_empresa=uf_orig,
+                uf_parceiro=uf_parceiro_mx,
+                ncm=ncm_mx,
+                origem_mercadoria=mx_orig[0],
+                cst_icms=mx_cst,
+                regime_pis_cofins=mx_reg_pc,
+                observacao_padrao=obs_int,
+                modo_nacional_27_ufs=mx_escopo.startswith("Modo 2"),
+                data_operacao=data_ref.isoformat(),
+            )
+        finally:
+            _conn_mx.close()
+
+        val_mx = validar_planilha_microvix(linhas_mx)
+        if val_mx["valido"]:
+            st.success(f"✅ Validador Pré-Exportação APROVADO: {val_mx['total_linhas']} linha(s) e 71 colunas (A–BS) prontas para importação no Linx Microvix.")
+        else:
+            for er in val_mx["erros"]:
+                st.error(f"🚫 {er}")
+
+        preview_cols = [
+            "ID Config", "Natureza de Operação", "UF da Operação", "Operação com Contribuinte (S/N)",
+            "CFOP", "CST ICMS", "CSOSN", "Alíquota ICMS", "Margem ST", "CST PIS", "CST COFINS", "Número da FCI",
+        ]
+        st.dataframe([{c: r[c] for c in preview_cols} for r in linhas_mx[:10]], use_container_width=True, hide_index=True)
+
+        if val_mx["valido"]:
+            bytes_mx = exportar_microvix_xlsx(linhas_mx)
+            st.download_button(
+                "📥 Baixar Importacao_ConfigTributaria_Microvix.xlsx",
+                data=bytes_mx,
+                file_name="Importacao_ConfigTributaria_Microvix.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_mx_dl_btn",
+                type="primary",
+                use_container_width=True,
             )
 
     # Filtros rápidos
