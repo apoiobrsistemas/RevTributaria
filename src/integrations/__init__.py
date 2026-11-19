@@ -15,7 +15,9 @@ from src.integrations.linx_terceiro_exporter import (
     COLUNAS_LAYOUT_LINX_TERCEIRO,
     converter_linhas_para_layout_linx_terceiro,
     exportar_layout_linx_terceiro_csv,
+    exportar_layout_linx_terceiro_por_ncm_origem_zip,
     exportar_layout_linx_terceiro_xlsx,
+    exportar_tabela_crua_xlsx,
 )
 from src.integrations.matriz_parser import (
     identificar_perna_operacao,
@@ -66,10 +68,12 @@ __all__ = [
     "consultar_regime_cnpj",
     "converter_linhas_para_layout_linx_terceiro",
     "exportar_layout_linx_terceiro_csv",
+    "exportar_layout_linx_terceiro_por_ncm_origem_zip",
     "exportar_layout_linx_terceiro_xlsx",
     "exportar_matriz_ncm_69_csv",
     "exportar_matriz_ncm_69_xlsx",
     "exportar_microvix_xlsx",
+    "exportar_tabela_crua_xlsx",
     "normalizar_linhas_matriz_69",
     "validar_matriz_ncm_69",
     "exportar_relatorio_auditoria_lote_xlsx",

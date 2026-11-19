@@ -85,10 +85,14 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
     from src.engine.lote_entrada_auditor import auditar_lote_xml_entrada
     from src.engine.reforma_tributaria_engine import ContextoReformaLC214, calcular_transicao_lc214
     from src.engine.xml_reforma_validator import validar_xml_reforma_lc214
-    from src.integrations.linx_terceiro_exporter import (
-        exportar_layout_linx_terceiro_csv,
-        exportar_layout_linx_terceiro_xlsx,
-    )
+    import src.integrations.linx_terceiro_exporter as _lt_mod
+
+    if not hasattr(_lt_mod, "exportar_layout_linx_terceiro_por_ncm_origem_zip"):
+        importlib.reload(_lt_mod)
+    exportar_layout_linx_terceiro_csv = _lt_mod.exportar_layout_linx_terceiro_csv
+    exportar_layout_linx_terceiro_por_ncm_origem_zip = _lt_mod.exportar_layout_linx_terceiro_por_ncm_origem_zip
+    exportar_layout_linx_terceiro_xlsx = _lt_mod.exportar_layout_linx_terceiro_xlsx
+    exportar_tabela_crua_xlsx = _lt_mod.exportar_tabela_crua_xlsx
     from src.integrations.microvix_conciliador import (
         conciliar_lote_com_microvix,
         exportar_relatorio_auditoria_lote_xlsx,
@@ -725,18 +729,26 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
         nome_base = nome_export.rsplit(".", 1)[0]
         colunas_export = list(filtradas[0].keys())
 
-        buf_csv = io.StringIO()
-        writer = csv.DictWriter(buf_csv, fieldnames=colunas_export, delimiter=";", extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(filtradas)
-        csv_bytes = ("\ufeff" + buf_csv.getvalue()).encode("utf-8")
-
-        linhas_txt = ["|".join(colunas_export)]
-        for row in filtradas:
-            linhas_txt.append("|".join(str(row.get(c, "")).replace("\n", " ") for c in colunas_export))
-        txt_bytes = "\n".join(linhas_txt).encode("utf-8")
-
         st.markdown("#### 📤 Exportar Resultado")
+
+        # 1. Excel Cru exatamente como exibido em tela
+        cr1, cr2 = st.columns([1.2, 1.8])
+        if cr1.button("⚙️ Gerar Excel Cru em Tela (.xlsx)", key="cm_prep_cru_xlsx", use_container_width=True):
+            with st.spinner(f"Gerando Excel cru em tela ({len(filtradas)} linhas)..."):
+                st.session_state["cm_cru_xlsx_bytes"] = exportar_tabela_crua_xlsx(filtradas)
+                st.session_state["cm_cru_xlsx_name"] = f"tela_cru_{nome_base}.xlsx"
+        if st.session_state.get("cm_cru_xlsx_bytes") and st.session_state.get("cm_cru_xlsx_name") == f"tela_cru_{nome_base}.xlsx":
+            cr2.download_button(
+                "📥 Baixar Excel Cru em Tela (.xlsx)",
+                data=st.session_state["cm_cru_xlsx_bytes"],
+                file_name=st.session_state["cm_cru_xlsx_name"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="cm_dl_cru_xlsx",
+                type="primary",
+                use_container_width=True,
+            )
+
+        # Matriz Completa 69 Campos
         if st.button("⚙️ Gerar Matriz Completa — Todos os 69 Campos (.xlsx / .csv)", key="cm_prep_69_filtradas", type="primary"):
             with st.spinner("Gerando planilha completa com 69 campos..."):
                 st.session_state["cm_69_filt_xlsx"] = exportar_matriz_ncm_69_xlsx(filtradas)
@@ -761,7 +773,9 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 key="cm_dl_69_filtradas_csv",
                 use_container_width=True,
             )
-        lx1, lx2, lx3 = st.columns([1.0, 1.4, 1.4])
+
+        # 2 & 3. Padrão Linx Terceiros: Arquivo Único Completo (31.500+ linhas) e ZIP Fracionado por NCM + Origem CST
+        lx1, lx2, lx3 = st.columns([0.9, 1.4, 1.5])
         id_cfg_ini = int(
             lx1.number_input(
                 "ID Config Inicial (Linx)",
@@ -771,55 +785,77 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                 key="cm_linx_id_cfg",
             )
         )
-        linx_csv_bytes = exportar_layout_linx_terceiro_csv(
-            filtradas,
-            id_config_inicial=id_cfg_ini,
-            ids_natureza=ids_salvos,
-        )
-        lx2.download_button(
-            "📥 Exportar Padrão Linx Terceiros (.csv)",
-            data=linx_csv_bytes,
-            file_name=f"linx_terceiros_{nome_base}.csv",
-            mime="text/csv",
-            key="cm_dl_linx_csv",
-            use_container_width=True,
-        )
-        if lx3.button("⚙️ Gerar Padrão Linx Terceiros (.xlsx)", key="cm_prep_linx_xlsx", use_container_width=True):
-            with st.spinner("Gerando planilha no layout oficial Linx (71 colunas)..."):
+        if lx2.button("⚙️ Gerar Padrão Linx Terceiros Completo (.xlsx / .csv)", key="cm_prep_linx_xlsx", use_container_width=True):
+            with st.spinner(f"Gerando arquivo único Linx Terceiros ({len(filtradas)} linhas)..."):
                 st.session_state["cm_linx_xlsx_bytes"] = exportar_layout_linx_terceiro_xlsx(
                     filtradas,
                     id_config_inicial=id_cfg_ini,
                     ids_natureza=ids_salvos,
                 )
+                st.session_state["cm_linx_csv_bytes"] = exportar_layout_linx_terceiro_csv(
+                    filtradas,
+                    id_config_inicial=id_cfg_ini,
+                    ids_natureza=ids_salvos,
+                )
                 st.session_state["cm_linx_xlsx_name"] = f"linx_terceiros_{nome_base}.xlsx"
+                st.session_state["cm_linx_csv_name"] = f"linx_terceiros_{nome_base}.csv"
+
+        if lx3.button("📦 Gerar ZIP Linx por NCM + Origem CST (.xlsx)", key="cm_prep_linx_zip", use_container_width=True):
+            with st.spinner("Gerando pacotes separados por NCM e 1º dígito do CST (0xx, 1xx, 2xx...)..."):
+                st.session_state["cm_linx_zip_bytes"] = exportar_layout_linx_terceiro_por_ncm_origem_zip(
+                    filtradas,
+                    id_config_inicial=id_cfg_ini,
+                    ids_natureza=ids_salvos,
+                    formato="xlsx",
+                )
+                st.session_state["cm_linx_zip_name"] = f"linx_terceiros_por_ncm_cst_{nome_base}.zip"
 
         if st.session_state.get("cm_linx_xlsx_bytes") and st.session_state.get("cm_linx_xlsx_name") == f"linx_terceiros_{nome_base}.xlsx":
-            st.download_button(
-                "📥 Baixar Padrão Linx Terceiros (.xlsx)",
+            dl_lx1, dl_lx2 = st.columns(2)
+            dl_lx1.download_button(
+                "📥 Baixar Padrão Linx Terceiros Completo (.xlsx)",
                 data=st.session_state["cm_linx_xlsx_bytes"],
                 file_name=st.session_state["cm_linx_xlsx_name"],
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="cm_dl_linx_xlsx",
+                type="primary",
+                use_container_width=True,
+            )
+            dl_lx2.download_button(
+                "📥 Baixar Padrão Linx Terceiros Completo (.csv)",
+                data=st.session_state["cm_linx_csv_bytes"],
+                file_name=st.session_state["cm_linx_csv_name"],
+                mime="text/csv",
+                key="cm_dl_linx_csv",
                 use_container_width=True,
             )
 
+        if st.session_state.get("cm_linx_zip_bytes") and st.session_state.get("cm_linx_zip_name") == f"linx_terceiros_por_ncm_cst_{nome_base}.zip":
+            st.download_button(
+                "📥 Baixar ZIP Fracionado por NCM + Início CST (0xx, 1xx, 2xx...)",
+                data=st.session_state["cm_linx_zip_bytes"],
+                file_name=st.session_state["cm_linx_zip_name"],
+                mime="application/zip",
+                key="cm_dl_linx_zip",
+                type="primary",
+                use_container_width=True,
+            )
+
+        # CSV / TXT / Excel padrão (sob demanda para não travar lotes grandes)
         ex1, ex2, ex3 = st.columns(3)
-        ex1.download_button(
-            "📥 Baixar CSV (.csv)",
-            data=csv_bytes,
-            file_name=f"{nome_base}.csv",
-            mime="text/csv",
-            key="cm_dl_csv",
-            use_container_width=True,
-        )
-        ex2.download_button(
-            "📥 Baixar TXT (.txt)",
-            data=txt_bytes,
-            file_name=f"{nome_base}.txt",
-            mime="text/plain",
-            key="cm_dl_txt",
-            use_container_width=True,
-        )
+        if ex1.button("⚙️ Preparar CSV (.csv)", key="cm_prep_csv", use_container_width=True):
+            buf_csv = io.StringIO()
+            writer = csv.DictWriter(buf_csv, fieldnames=colunas_export, delimiter=";", extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(filtradas)
+            st.session_state["cm_csv_bytes"] = ("\ufeff" + buf_csv.getvalue()).encode("utf-8")
+            st.session_state["cm_csv_name"] = f"{nome_base}.csv"
+        if ex2.button("⚙️ Preparar TXT (.txt)", key="cm_prep_txt", use_container_width=True):
+            linhas_txt = ["|".join(colunas_export)]
+            for row in filtradas:
+                linhas_txt.append("|".join(str(row.get(c, "")).replace("\n", " ") for c in colunas_export))
+            st.session_state["cm_txt_bytes"] = "\n".join(linhas_txt).encode("utf-8")
+            st.session_state["cm_txt_name"] = f"{nome_base}.txt"
         if ex3.button("⚙️ Preparar Excel (.xlsx)", key="cm_prep_xlsx", use_container_width=True):
             with st.spinner("Gerando planilhas Excel (.xlsx)..."):
                 srv_exp = RevTributariaService(db_path)
@@ -830,6 +866,11 @@ def render_consulta_matriz_ncm(*, db_path: str) -> None:
                     st.session_state["cm_xlsx_qtd"] = len(filtradas)
                 finally:
                     srv_exp.close()
+
+        if st.session_state.get("cm_csv_bytes") and st.session_state.get("cm_csv_name") == f"{nome_base}.csv":
+            st.download_button("📥 Baixar CSV (.csv)", data=st.session_state["cm_csv_bytes"], file_name=st.session_state["cm_csv_name"], mime="text/csv", key="cm_dl_csv", use_container_width=True)
+        if st.session_state.get("cm_txt_bytes") and st.session_state.get("cm_txt_name") == f"{nome_base}.txt":
+            st.download_button("📥 Baixar TXT (.txt)", data=st.session_state["cm_txt_bytes"], file_name=st.session_state["cm_txt_name"], mime="text/plain", key="cm_dl_txt", use_container_width=True)
 
         if st.session_state.get("cm_xlsx_bytes") and st.session_state.get("cm_xlsx_name") == nome_export:
             st.success(f"Planilhas Excel prontas ({st.session_state.get('cm_xlsx_qtd', len(filtradas))} linhas). Clique abaixo para baixar:")

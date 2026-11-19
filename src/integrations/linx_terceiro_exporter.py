@@ -5,9 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import re
+import zipfile
+from collections import defaultdict
 from typing import Any
 
 import openpyxl
+from openpyxl.cell import WriteOnlyCell
 
 from src.integrations.microvix_conciliador import sanitizar_celula_planilha
 
@@ -268,20 +271,27 @@ def exportar_layout_linx_terceiro_xlsx(
     ids_natureza: dict[str, int] | None = None,
     usar_ncm_no_id_config: bool = True,
 ) -> bytes:
-    """Exporta planilha .xlsx exatamente no modelo oficial de importação Linx (71 colunas)."""
+    """Exporta planilha .xlsx em modo streaming (write_only) no modelo Linx (71 colunas)."""
     convertidas = converter_linhas_para_layout_linx_terceiro(
         linhas,
         id_config_inicial=id_config_inicial,
         ids_natureza=ids_natureza,
         usar_ncm_no_id_config=usar_ncm_no_id_config,
     )
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Config_Tributaria_Linx"
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet(title="Config_Tributaria_Linx")
     ws.append(list(COLUNAS_LAYOUT_LINX_TERCEIRO))
     for reg in convertidas:
-        ws.append([sanitizar_celula_planilha(reg.get(col, "")) for col in COLUNAS_LAYOUT_LINX_TERCEIRO])
-        ws.cell(row=ws.max_row, column=1).number_format = "@"
+        row_cells: list[Any] = []
+        for idx_col, col in enumerate(COLUNAS_LAYOUT_LINX_TERCEIRO):
+            val = sanitizar_celula_planilha(reg.get(col, ""))
+            if idx_col == 0:
+                c = WriteOnlyCell(ws, value=val)
+                c.number_format = "@"
+                row_cells.append(c)
+            else:
+                row_cells.append(val)
+        ws.append(row_cells)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -313,3 +323,65 @@ def exportar_layout_linx_terceiro_csv(
     for reg in convertidas:
         writer.writerow({k: sanitizar_celula_planilha(v) for k, v in reg.items()})
     return buf.getvalue().encode("utf-8-sig")
+
+
+def exportar_tabela_crua_xlsx(
+    linhas: list[dict[str, Any]],
+    *,
+    sheet_name: str = "Consulta_Matriz",
+) -> bytes:
+    """Exporta exatamente as colunas e valores crus exibidos em tela para .xlsx (streaming)."""
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet(title=sheet_name[:31])
+    if linhas:
+        colunas = list(linhas[0].keys())
+        ws.append(colunas)
+        for row in linhas:
+            ws.append([sanitizar_celula_planilha(row.get(c, "")) for c in colunas])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _extrair_digito_origem_cst(cst_val: Any) -> str:
+    digs = re.sub(r"\D", "", str(cst_val or ""))
+    return digs[0] if digs else "0"
+
+
+def exportar_layout_linx_terceiro_por_ncm_origem_zip(
+    linhas: list[dict[str, Any]],
+    *,
+    id_config_inicial: int = 1,
+    ids_natureza: dict[str, int] | None = None,
+    usar_ncm_no_id_config: bool = True,
+    formato: str = "xlsx",
+) -> bytes:
+    """Agrupa por NCM e 1º dígito do CST ICMS (0xx, 1xx, 2xx...) e empacota em um .zip."""
+    grupos: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for linha in linhas:
+        ncm_raw = re.sub(r"\D", "", str(linha.get("NCM") or "")) or str(linha.get("NCM") or "SEM_NCM").strip()
+        orig_dig = _extrair_digito_origem_cst(linha.get("CST ICMS"))
+        grupos[(ncm_raw, orig_dig)].append(linha)
+
+    ext = "csv" if formato.lower() == "csv" else "xlsx"
+    buf_zip = io.BytesIO()
+    with zipfile.ZipFile(buf_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for (ncm_key, orig_dig) in sorted(grupos.keys()):
+            sub_linhas = grupos[(ncm_key, orig_dig)]
+            if ext == "csv":
+                payload = exportar_layout_linx_terceiro_csv(
+                    sub_linhas,
+                    id_config_inicial=id_config_inicial,
+                    ids_natureza=ids_natureza,
+                    usar_ncm_no_id_config=usar_ncm_no_id_config,
+                )
+            else:
+                payload = exportar_layout_linx_terceiro_xlsx(
+                    sub_linhas,
+                    id_config_inicial=id_config_inicial,
+                    ids_natureza=ids_natureza,
+                    usar_ncm_no_id_config=usar_ncm_no_id_config,
+                )
+            nome_arq = f"{ncm_key}_CST_{orig_dig}xx.{ext}"
+            zf.writestr(nome_arq, payload)
+    return buf_zip.getvalue()

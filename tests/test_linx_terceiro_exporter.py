@@ -65,3 +65,38 @@ def test_exportador_linx_terceiro_71_colunas_e_formatacao(tmp_path: Path) -> Non
         assert rows_csv[0]["Natureza de Operação"] == "43"
     finally:
         srv.close()
+
+
+def test_exportar_tabela_crua_e_zip_por_ncm_origem_cst() -> None:
+    import zipfile
+    from src.integrations.linx_terceiro_exporter import (
+        exportar_layout_linx_terceiro_por_ncm_origem_zip,
+        exportar_tabela_crua_xlsx,
+    )
+
+    linhas_mock = [
+        {"NCM": "85071090", "CST ICMS": "0.00", "CFOP": "5102", "UF da Operação": "SP", "Natureza de Operação": "Venda"},
+        {"NCM": "85071090", "CST ICMS": "2.00", "CFOP": "5102", "UF da Operação": "SP", "Natureza de Operação": "Venda"},
+        {"NCM": "85071090", "CST ICMS": "2.41", "CFOP": "5102", "UF da Operação": "RJ", "Natureza de Operação": "Venda"},
+        {"NCM": "85071090", "CST ICMS": "2.60", "CFOP": "5405", "UF da Operação": "MG", "Natureza de Operação": "Venda"},
+        {"NCM": "61046000", "CST ICMS": "1.20", "CFOP": "6102", "UF da Operação": "PR", "Natureza de Operação": "Venda"},
+    ]
+
+    cru_bytes = exportar_tabela_crua_xlsx(linhas_mock)
+    wb_cru = openpyxl.load_workbook(io.BytesIO(cru_bytes))
+    ws_cru = wb_cru.active
+    assert [c.value for c in ws_cru[1]] == list(linhas_mock[0].keys())
+    assert ws_cru.max_row == 6
+
+    zip_bytes = exportar_layout_linx_terceiro_por_ncm_origem_zip(linhas_mock, formato="xlsx")
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        nomes = sorted(zf.namelist())
+        assert nomes == [
+            "61046000_CST_1xx.xlsx",
+            "85071090_CST_0xx.xlsx",
+            "85071090_CST_2xx.xlsx",
+        ]
+        wb_2xx = openpyxl.load_workbook(io.BytesIO(zf.read("85071090_CST_2xx.xlsx")))
+        ws_2xx = wb_2xx.active
+        # 1 header + 3 linhas (2.00, 2.41, 2.60)
+        assert ws_2xx.max_row == 4
